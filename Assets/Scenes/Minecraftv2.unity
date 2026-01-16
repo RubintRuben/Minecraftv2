@@ -119,6 +119,112 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &337001631
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 337001634}
+  - component: {fileID: 337001637}
+  - component: {fileID: 337001636}
+  - component: {fileID: 337001635}
+  m_Layer: 0
+  m_Name: BlockOutline
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &337001634
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 337001631}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 43.19133, y: -0.00001, z: 111.32939}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &337001635
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 337001631}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 51e6a85218d60fc4dad39e6910f89b14, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BlockOutlineMesh
+  inset: 0.0025
+  lineWidth: 0.03
+  color: {r: 0, g: 0, b: 0, a: 1}
+--- !u!23 &337001636
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 337001631}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: 0}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 0
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_MaskInteraction: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!33 &337001637
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 337001631}
+  m_Mesh: {fileID: 0}
 --- !u!1 &887125291
 GameObject:
   m_ObjectHideFlags: 0
@@ -131,7 +237,8 @@ GameObject:
   - component: {fileID: 887125292}
   - component: {fileID: 887125294}
   - component: {fileID: 887125293}
-  m_Layer: 0
+  - component: {fileID: 887125296}
+  m_Layer: 3
   m_Name: Camera
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -256,6 +363,26 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1038445186}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &887125296
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 887125291}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 73b6fc3097b55184eaf95c0bf694aca5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BlockInteractor
+  world: {fileID: 1172525742}
+  reach: 6
+  placeType: 1
+  outline: {fileID: 337001635}
+  playerController: {fileID: 0}
+  hitMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
 --- !u!1 &1038445179
 GameObject:
   m_ObjectHideFlags: 0
@@ -270,29 +397,13 @@ GameObject:
   - component: {fileID: 1038445183}
   - component: {fileID: 1038445182}
   - component: {fileID: 1038445181}
-  - component: {fileID: 1038445180}
-  m_Layer: 0
+  m_Layer: 3
   m_Name: Player
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1038445180
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1038445179}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 73b6fc3097b55184eaf95c0bf694aca5, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::BlockInteractor
-  world: {fileID: 1172525742}
-  reach: 6
-  placeType: 1
 --- !u!114 &1038445181
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -308,10 +419,18 @@ MonoBehaviour:
   playerCamera: {fileID: 887125292}
   mouseSensitivity: 2
   maxLookAngle: 85
-  moveSpeed: 6
-  sprintMultiplier: 1.5
+  walkSpeed: 6
+  sprintSpeed: 9
+  crouchSpeed: 3.2
+  groundAcceleration: 30
+  airAcceleration: 8
+  groundFriction: 12
   jumpHeight: 1.2
   gravity: -20
+  standingHeight: 1.8
+  crouchHeight: 1.2
+  crouchTransitionSpeed: 12
+  crouchEdgeSafety: 1
 --- !u!143 &1038445182
 CharacterController:
   m_ObjectHideFlags: 0
@@ -426,7 +545,7 @@ Transform:
   m_GameObject: {fileID: 1038445179}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -2.4198, y: 0, z: -7.08367}
+  m_LocalPosition: {x: -2.4198, y: 84.4, z: -7.08367}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -463,11 +582,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ba7a53ab9ee07734aa503eb6dc30cbd9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: '::'
-  grassTop: {fileID: 2800000, guid: f02afa92f2c3a0046ad076f246e9d9fc, type: 3}
-  grassSide: {fileID: 2800000, guid: 828fed324e802a24f9ec3d7d78522ff4, type: 3}
-  dirt: {fileID: 2800000, guid: 5cd64beeefbef004fb5a067a4cbf8512, type: 3}
-  voxelMaterial: {fileID: 2100000, guid: 9caf2714cbf718e4eb30430ffb2998fa, type: 2}
-  player: {fileID: 0}
+  matGrassTop: {fileID: 2100000, guid: 7d8ee0d9b56148b4495d429751d6c190, type: 2}
+  matGrassSide: {fileID: 2100000, guid: f747a8246ad4d8d49921a7536331e80d, type: 2}
+  matDirt: {fileID: 2100000, guid: db0706277e7d93e4d81a52a6943d1caf, type: 2}
+  player: {fileID: 1038445186}
   viewDistanceInChunks: 6
   seed: 12345
   noiseScale: 0.03
@@ -485,11 +603,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ba7a53ab9ee07734aa503eb6dc30cbd9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VoxelWorld
-  grassTop: {fileID: 2800000, guid: f02afa92f2c3a0046ad076f246e9d9fc, type: 3}
-  grassSide: {fileID: 2800000, guid: 828fed324e802a24f9ec3d7d78522ff4, type: 3}
-  dirt: {fileID: 2800000, guid: 5cd64beeefbef004fb5a067a4cbf8512, type: 3}
-  voxelMaterial: {fileID: 0}
-  player: {fileID: 0}
+  matGrassTop: {fileID: 2100000, guid: 7d8ee0d9b56148b4495d429751d6c190, type: 2}
+  matGrassSide: {fileID: 2100000, guid: f747a8246ad4d8d49921a7536331e80d, type: 2}
+  matDirt: {fileID: 2100000, guid: db0706277e7d93e4d81a52a6943d1caf, type: 2}
+  player: {fileID: 1038445186}
   viewDistanceInChunks: 6
   seed: 12345
   noiseScale: 0.03
@@ -644,3 +761,4 @@ SceneRoots:
   - {fileID: 1426906496}
   - {fileID: 1172525744}
   - {fileID: 1038445186}
+  - {fileID: 337001634}

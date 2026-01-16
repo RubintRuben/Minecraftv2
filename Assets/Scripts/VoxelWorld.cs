@@ -3,49 +3,75 @@ using UnityEngine;
 
 public class VoxelWorld : MonoBehaviour
 {
-    [Header("Materials (assign in Inspector)")]
-    public Material matGrassTop;
-    public Material matGrassSide;
-    public Material matDirt;
+    [System.Serializable]
+    public class BlockMaterials
+    {
+        public Material grassTop;
+        public Material grassSide;
+        public Material dirt;
+        public Material logTop;
+        public Material logSide;
+        public Material leaves;
+    }
 
-    [Header("World Settings")]
-    public Transform player;
-    public int viewDistanceInChunks = 6;
-    public int seed = 12345;
+    [System.Serializable]
+    public class WorldSettings
+    {
+        public Transform player;
+        public int viewDistanceInChunks = 6;
+        public int seed = 12345;
+    }
 
-    [Header("Terrain Noise")]
-    public float noiseScale = 0.03f;
-    public int baseHeight = 24;
-    public int heightAmplitude = 16;
+    [System.Serializable]
+    public class TerrainNoise
+    {
+        public float noiseScale = 0.03f;
+        public int baseHeight = 24;
+        public int heightAmplitude = 16;
+    }
+
+    [System.Serializable]
+    public class Trees
+    {
+        public bool enabled = true;
+        public int chancePercent = 3;
+        public int minTrunkHeight = 4;
+        public int maxTrunkHeight = 6;
+    }
+
+    public BlockMaterials materials;
+    public WorldSettings settings;
+    public TerrainNoise terrain;
+    public Trees trees;
 
     private readonly Dictionary<Vector2Int, Chunk> chunks = new Dictionary<Vector2Int, Chunk>();
     private readonly HashSet<Vector2Int> activeChunkCoords = new HashSet<Vector2Int>();
 
     private void Awake()
     {
-        Random.InitState(seed);
+        Random.InitState(settings.seed);
     }
 
     private void Start()
     {
-        UpdateWorld(force: true);
+        UpdateWorld(true);
     }
 
     private void Update()
     {
-        UpdateWorld(force: false);
+        UpdateWorld(false);
     }
 
     private void UpdateWorld(bool force)
     {
-        if (player == null) return;
+        if (settings.player == null) return;
 
-        Vector2Int playerChunk = WorldToChunkCoord(player.position);
+        Vector2Int playerChunk = WorldToChunkCoord(settings.player.position);
 
         activeChunkCoords.Clear();
-        for (int x = -viewDistanceInChunks; x <= viewDistanceInChunks; x++)
+        for (int x = -settings.viewDistanceInChunks; x <= settings.viewDistanceInChunks; x++)
         {
-            for (int z = -viewDistanceInChunks; z <= viewDistanceInChunks; z++)
+            for (int z = -settings.viewDistanceInChunks; z <= settings.viewDistanceInChunks; z++)
             {
                 Vector2Int coord = new Vector2Int(playerChunk.x + x, playerChunk.y + z);
                 activeChunkCoords.Add(coord);
@@ -71,7 +97,7 @@ public class VoxelWorld : MonoBehaviour
         go.transform.position = new Vector3(coord.x * VoxelData.ChunkSize, 0, coord.y * VoxelData.ChunkSize);
 
         Chunk chunk = go.AddComponent<Chunk>();
-        chunk.Init(this, coord, matGrassTop, matGrassSide, matDirt);
+        chunk.Init(this, coord, materials);
 
         chunks.Add(coord, chunk);
     }
@@ -85,12 +111,47 @@ public class VoxelWorld : MonoBehaviour
 
     public int GetHeight(int worldX, int worldZ)
     {
-        float nx = (worldX + seed) * noiseScale;
-        float nz = (worldZ + seed) * noiseScale;
+        float nx = (worldX + settings.seed) * terrain.noiseScale;
+        float nz = (worldZ + settings.seed) * terrain.noiseScale;
         float n = Mathf.PerlinNoise(nx, nz);
-        int h = baseHeight + Mathf.RoundToInt(n * heightAmplitude);
-        h = Mathf.Clamp(h, 1, VoxelData.ChunkHeight - 1);
+        int h = terrain.baseHeight + Mathf.RoundToInt(n * terrain.heightAmplitude);
+        h = Mathf.Clamp(h, 1, VoxelData.ChunkHeight - 2);
         return h;
+    }
+
+    public bool ShouldPlaceTree(int worldX, int worldZ)
+    {
+        if (!trees.enabled) return false;
+
+        int h = Hash(worldX, worldZ, settings.seed);
+        int v = Mathf.Abs(h) % 100;
+        return v < Mathf.Clamp(trees.chancePercent, 0, 100);
+    }
+
+    public int GetTreeTrunkHeight(int worldX, int worldZ)
+    {
+        int h = Hash(worldX * 73856093, worldZ * 19349663, settings.seed ^ 0x5bd1e995);
+        int range = Mathf.Max(1, trees.maxTrunkHeight - trees.minTrunkHeight + 1);
+        return trees.minTrunkHeight + (Mathf.Abs(h) % range);
+    }
+
+    private int Hash(int x, int z, int seed)
+    {
+        unchecked
+        {
+            int h = seed;
+            h = (h * 397) ^ x;
+            h = (h * 397) ^ z;
+            h ^= (h << 13);
+            h ^= (h >> 17);
+            h ^= (h << 5);
+            return h;
+        }
+    }
+
+    public int Hash3(int x, int y, int z)
+    {
+        return Hash(x, z, Hash(y, x, settings.seed));
     }
 
     public BlockType GetBlock(Vector3Int worldPos)

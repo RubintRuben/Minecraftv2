@@ -13,24 +13,27 @@ public class Chunk : MonoBehaviour
 
     private BlockType[,,] blocks;
 
-    private Material matGrassTop;
-    private Material matGrassSide;
-    private Material matDirt;
+    private VoxelWorld.BlockMaterials mats;
 
-    public void Init(VoxelWorld world, Vector2Int coord, Material grassTop, Material grassSide, Material dirt)
+    public void Init(VoxelWorld world, Vector2Int coord, VoxelWorld.BlockMaterials materials)
     {
         this.world = world;
         this.coord = coord;
-
-        matGrassTop = grassTop;
-        matGrassSide = grassSide;
-        matDirt = dirt;
+        mats = materials;
 
         meshFilter = GetComponent<MeshFilter>();
         meshRenderer = GetComponent<MeshRenderer>();
         meshCollider = GetComponent<MeshCollider>();
 
-        meshRenderer.sharedMaterials = new Material[] { matGrassTop, matGrassSide, matDirt };
+        meshRenderer.sharedMaterials = new Material[]
+        {
+            mats.grassTop,
+            mats.grassSide,
+            mats.dirt,
+            mats.logTop,
+            mats.logSide,
+            mats.leaves
+        };
 
         blocks = new BlockType[VoxelData.ChunkSize, VoxelData.ChunkHeight, VoxelData.ChunkSize];
 
@@ -95,6 +98,56 @@ public class Chunk : MonoBehaviour
                 }
             }
         }
+
+        for (int x = 2; x < VoxelData.ChunkSize - 2; x++)
+        {
+            for (int z = 2; z < VoxelData.ChunkSize - 2; z++)
+            {
+                int wx = coord.x * VoxelData.ChunkSize + x;
+                int wz = coord.y * VoxelData.ChunkSize + z;
+
+                int groundY = world.GetHeight(wx, wz);
+                if (groundY <= 1 || groundY >= VoxelData.ChunkHeight - 10) continue;
+
+                if (!world.ShouldPlaceTree(wx, wz)) continue;
+                if (blocks[x, groundY, z] != BlockType.Grass) continue;
+
+                int trunkH = world.GetTreeTrunkHeight(wx, wz);
+
+                for (int i = 1; i <= trunkH; i++)
+                {
+                    int y = groundY + i;
+                    if (y < 0 || y >= VoxelData.ChunkHeight) break;
+                    blocks[x, y, z] = BlockType.Log;
+                }
+
+                int topY = groundY + trunkH;
+                int r = 2;
+
+                for (int lx = -r; lx <= r; lx++)
+                {
+                    for (int lz = -r; lz <= r; lz++)
+                    {
+                        for (int ly = -r; ly <= r; ly++)
+                        {
+                            int ax = x + lx;
+                            int az = z + lz;
+                            int ay = topY + ly;
+
+                            if (ax < 0 || ax >= VoxelData.ChunkSize) continue;
+                            if (az < 0 || az >= VoxelData.ChunkSize) continue;
+                            if (ay < 0 || ay >= VoxelData.ChunkHeight) continue;
+
+                            float d = Mathf.Abs(lx) + Mathf.Abs(lz) + Mathf.Abs(ly) * 1.25f;
+                            if (d > 4.2f) continue;
+
+                            if (blocks[ax, ay, az] == BlockType.Air)
+                                blocks[ax, ay, az] = BlockType.Leaves;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     public void Rebuild()
@@ -102,9 +155,12 @@ public class Chunk : MonoBehaviour
         List<Vector3> verts = new List<Vector3>();
         List<Vector2> uvs = new List<Vector2>();
 
-        List<int> trisGrassTop = new List<int>();  
-        List<int> trisGrassSide = new List<int>(); 
-        List<int> trisDirt = new List<int>();      
+        List<int> trisGrassTop = new List<int>();
+        List<int> trisGrassSide = new List<int>();
+        List<int> trisDirt = new List<int>();
+        List<int> trisLogTop = new List<int>();
+        List<int> trisLogSide = new List<int>();
+        List<int> trisLeaves = new List<int>();
 
         int vertIndex = 0;
 
@@ -116,6 +172,8 @@ public class Chunk : MonoBehaviour
                 {
                     BlockType bt = blocks[x, y, z];
                     if (bt == BlockType.Air) continue;
+
+                    int rot = RotationFor(LocalToWorld(new Vector3Int(x, y, z)));
 
                     Vector3Int local = new Vector3Int(x, y, z);
 
@@ -130,10 +188,10 @@ public class Chunk : MonoBehaviour
                         {
                             int v = VoxelData.Tris[face, i];
                             verts.Add(new Vector3(x, y, z) + VoxelData.Verts[v]);
-                            uvs.Add(VoxelData.BaseUVs[i]); // teljes textúra (0..1)
+                            uvs.Add(RotUV(VoxelData.BaseUVs[i], rot));
                         }
 
-                        List<int> triList = PickTriList(bt, face, trisGrassTop, trisGrassSide, trisDirt);
+                        List<int> triList = PickTriList(bt, face, trisGrassTop, trisGrassSide, trisDirt, trisLogTop, trisLogSide, trisLeaves);
 
                         triList.Add(vertIndex + 0);
                         triList.Add(vertIndex + 1);
@@ -154,10 +212,13 @@ public class Chunk : MonoBehaviour
         m.SetVertices(verts);
         m.SetUVs(0, uvs);
 
-        m.subMeshCount = 3;
+        m.subMeshCount = 6;
         m.SetTriangles(trisGrassTop, 0);
         m.SetTriangles(trisGrassSide, 1);
         m.SetTriangles(trisDirt, 2);
+        m.SetTriangles(trisLogTop, 3);
+        m.SetTriangles(trisLogSide, 4);
+        m.SetTriangles(trisLeaves, 5);
 
         m.RecalculateNormals();
         m.RecalculateBounds();
@@ -167,18 +228,50 @@ public class Chunk : MonoBehaviour
         meshCollider.sharedMesh = m;
     }
 
-    private List<int> PickTriList(BlockType bt, int face, List<int> grassTop, List<int> grassSide, List<int> dirt)
+    private int RotationFor(Vector3Int worldPos)
+    {
+        int h = world.Hash3(worldPos.x, worldPos.y, worldPos.z);
+        int r = Mathf.Abs(h) & 3;
+        return r;
+    }
+
+    private Vector2 RotUV(Vector2 uv, int rot)
+    {
+        float u = uv.x;
+        float v = uv.y;
+
+        if (rot == 0) return new Vector2(u, v);
+        if (rot == 1) return new Vector2(v, 1f - u);
+        if (rot == 2) return new Vector2(1f - u, 1f - v);
+        return new Vector2(1f - v, u);
+    }
+
+    private List<int> PickTriList(
+        BlockType bt,
+        int face,
+        List<int> grassTop,
+        List<int> grassSide,
+        List<int> dirt,
+        List<int> logTop,
+        List<int> logSide,
+        List<int> leaves)
     {
         if (bt == BlockType.Dirt) return dirt;
 
         if (bt == BlockType.Grass)
         {
             if (face == 2) return grassTop;
-
             if (face == 3) return dirt;
-
             return grassSide;
         }
+
+        if (bt == BlockType.Log)
+        {
+            if (face == 2 || face == 3) return logTop;
+            return logSide;
+        }
+
+        if (bt == BlockType.Leaves) return leaves;
 
         return dirt;
     }
