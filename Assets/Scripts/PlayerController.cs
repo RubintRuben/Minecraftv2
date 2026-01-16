@@ -6,6 +6,8 @@ public class PlayerController : MonoBehaviour
 {
     public Camera playerCamera;
 
+    public string playerLayerName = "Player";
+
     public float mouseSensitivity = 0.15f;
     public float maxLookAngle = 85f;
 
@@ -25,7 +27,7 @@ public class PlayerController : MonoBehaviour
     public float crouchTransitionSpeed = 12f;
 
     public bool crouchEdgeSafety = true;
-    public float maxDropWhileCrouching = 0.05f;
+    public float maxDropWhileCrouching = 0.02f;
 
     public LayerMask worldMask = ~0;
 
@@ -36,6 +38,15 @@ public class PlayerController : MonoBehaviour
     private Vector3 horizVel;
 
     private bool isCrouching;
+
+    private int playerLayer = -1;
+
+    private float camStandY;
+    private float camCrouchY;
+
+    // Space-hold autojump: egyszer ugrik egy "grounded szakaszban",
+    // és csak akkor enged újra, ha elhagyta a talajt (vagy elengedte a space-t).
+    private bool jumpHeldConsumed;
 
     private int EffectiveMask
     {
@@ -55,8 +66,67 @@ public class PlayerController : MonoBehaviour
         cc.height = standingHeight;
         cc.center = new Vector3(0, standingHeight * 0.5f, 0);
 
+        if (playerCamera != null)
+        {
+            camStandY = playerCamera.transform.localPosition.y;
+            camCrouchY = camStandY - (standingHeight - crouchHeight);
+        }
+
+        playerLayer = LayerMask.NameToLayer(playerLayerName);
+        if (playerLayer >= 0)
+        {
+            ApplyLayerToVisuals(playerLayer);
+
+            if (playerCamera != null)
+            {
+                playerCamera.cullingMask &= ~(1 << playerLayer);
+                playerCamera.gameObject.layer = 0;
+            }
+        }
+
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
+    }
+
+    private void ApplyLayerToVisuals(int layer)
+    {
+        var renderers = GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i] == null) continue;
+            if (playerCamera != null && renderers[i].transform.IsChildOf(playerCamera.transform)) continue;
+            renderers[i].gameObject.layer = layer;
+        }
+    }
+
+    public void PlaceAboveGround(Vector3 xzWorld, float castUp, float extraUp)
+    {
+        Vector3 start = new Vector3(xzWorld.x, castUp, xzWorld.z);
+
+        bool wasEnabled = cc.enabled;
+        cc.enabled = false;
+        transform.position = start;
+        cc.enabled = wasEnabled;
+
+        Physics.SyncTransforms();
+
+        int mask = EffectiveMask;
+        if (Physics.Raycast(start, Vector3.down, out RaycastHit hit, castUp + 2000f, mask, QueryTriggerInteraction.Ignore))
+        {
+            // Megjegyzés: ha a Player transform skálázva van, a CC valós mérete is skálázódik.
+            // A legjobb: a Player root scale = (1,1,1).
+            float y = hit.point.y + (cc.height * 0.5f) + extraUp;
+
+            bool we = cc.enabled;
+            cc.enabled = false;
+            transform.position = new Vector3(xzWorld.x, y, xzWorld.z);
+            cc.enabled = we;
+            Physics.SyncTransforms();
+        }
+
+        velocity = Vector3.zero;
+        horizVel = Vector3.zero;
+        jumpHeldConsumed = false;
     }
 
     private void Update()
@@ -89,7 +159,6 @@ public class PlayerController : MonoBehaviour
         isCrouching = wantCrouch;
 
         float targetH = isCrouching ? crouchHeight : standingHeight;
-
         if (!isCrouching && !HasHeadroomForStanding())
             targetH = cc.height;
 
@@ -99,10 +168,10 @@ public class PlayerController : MonoBehaviour
 
         if (playerCamera != null)
         {
-            Vector3 camLocal = playerCamera.transform.localPosition;
-            float targetCamY = cc.height - 0.1f;
-            camLocal.y = Mathf.Lerp(camLocal.y, targetCamY, Time.deltaTime * crouchTransitionSpeed);
-            playerCamera.transform.localPosition = camLocal;
+            float targetCamY = isCrouching ? camCrouchY : camStandY;
+            Vector3 lp = playerCamera.transform.localPosition;
+            lp.y = Mathf.Lerp(lp.y, targetCamY, Time.deltaTime * crouchTransitionSpeed);
+            playerCamera.transform.localPosition = lp;
         }
     }
 
@@ -140,37 +209,71 @@ public class PlayerController : MonoBehaviour
         Vector3 horizMove = horizVel * Time.deltaTime;
 
         if (grounded && isCrouching && crouchEdgeSafety && horizMove.sqrMagnitude > 0.0000001f)
-        {
-            if (!CanMoveWithoutDropping(horizMove))
-                horizMove = Vector3.zero;
-        }
+            horizMove = ClampMoveOnEdge(horizMove);
 
         cc.Move(horizMove);
 
-        bool jumpPressed = Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
-        if (grounded && jumpPressed && !isCrouching)
+        // ---- JUMP LOGIC (Shift közben is + space-hold autojump) ----
+        bool spaceHeld = Keyboard.current != null && Keyboard.current.spaceKey.isPressed;
+
+        // ha a levegőben vagyunk, újra engedjük a "hold ugrást"
+        if (!grounded)
+            jumpHeldConsumed = false;
+
+        // ha talajon vagyunk és nincs nyomva a space, szintén engedjük
+        if (grounded && !spaceHeld)
+            jumpHeldConsumed = false;
+
+        // Autojump: ha talajon vagyunk és space nyomva van -> egy ugrás / grounded szakasz
+        if (grounded && spaceHeld && !jumpHeldConsumed)
         {
             velocity.y = Mathf.Sqrt(2f * jumpHeight * -gravity);
+            jumpHeldConsumed = true;
         }
 
         velocity.y += gravity * Time.deltaTime;
         cc.Move(Vector3.up * velocity.y * Time.deltaTime);
     }
 
-    private bool CanMoveWithoutDropping(Vector3 proposedMove)
+    private Vector3 ClampMoveOnEdge(Vector3 proposedMove)
     {
-        Vector3 pos = transform.position + proposedMove;
+        if (CanStepWithoutDropping(proposedMove)) return proposedMove;
 
-        float radius = cc.radius * 0.9f;
+        Vector3 xOnly = new Vector3(proposedMove.x, 0f, 0f);
+        Vector3 zOnly = new Vector3(0f, 0f, proposedMove.z);
+
+        bool xOk = xOnly.sqrMagnitude > 0.0000001f && CanStepWithoutDropping(xOnly);
+        bool zOk = zOnly.sqrMagnitude > 0.0000001f && CanStepWithoutDropping(zOnly);
+
+        if (xOk && zOk) return proposedMove;
+        if (xOk) return xOnly;
+        if (zOk) return zOnly;
+        return Vector3.zero;
+    }
+
+    private bool CanStepWithoutDropping(Vector3 proposedMove)
+    {
+        if (!GetGroundYAt(transform.position, out float yNow)) return false;
+        if (!GetGroundYAt(transform.position + proposedMove, out float yNext)) return false;
+        return (yNow - yNext) <= maxDropWhileCrouching;
+    }
+
+    private bool GetGroundYAt(Vector3 pos, out float groundY)
+    {
         Vector3 center = pos + cc.center;
+        float radius = cc.radius * 0.95f;
         float footY = center.y - cc.height * 0.5f + radius;
 
-        Vector3 probe = new Vector3(center.x, footY + 0.02f, center.z);
+        Vector3 origin = new Vector3(center.x, footY + 0.25f, center.z);
 
-        if (!Physics.SphereCast(probe, radius, Vector3.down, out RaycastHit hit, 2f, EffectiveMask, QueryTriggerInteraction.Ignore))
-            return false;
+        if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 2.0f, EffectiveMask, QueryTriggerInteraction.Ignore))
+        {
+            groundY = hit.point.y;
+            return true;
+        }
 
-        return hit.distance <= (0.02f + maxDropWhileCrouching);
+        groundY = 0f;
+        return false;
     }
 
     private Vector2 ReadMoveInput()
@@ -192,9 +295,10 @@ public class PlayerController : MonoBehaviour
     private bool IsSprinting(Vector2 move2)
     {
         if (Keyboard.current == null) return false;
+        if (isCrouching) return false;
         bool ctrl = Keyboard.current.leftCtrlKey.isPressed || Keyboard.current.rightCtrlKey.isPressed;
         bool forward = move2.y > 0.5f;
-        return ctrl && forward && !isCrouching;
+        return ctrl && forward;
     }
 
     public bool IntersectsBlock(Vector3Int blockPos)

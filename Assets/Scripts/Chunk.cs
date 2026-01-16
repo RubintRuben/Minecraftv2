@@ -66,7 +66,6 @@ public class Chunk : MonoBehaviour
         if (localPos.x < 0 || localPos.x >= VoxelData.ChunkSize) return BlockType.Air;
         if (localPos.z < 0 || localPos.z >= VoxelData.ChunkSize) return BlockType.Air;
         if (localPos.y < 0 || localPos.y >= VoxelData.ChunkHeight) return BlockType.Air;
-
         return blocks[localPos.x, localPos.y, localPos.z];
     }
 
@@ -75,7 +74,6 @@ public class Chunk : MonoBehaviour
         if (localPos.x < 0 || localPos.x >= VoxelData.ChunkSize) return;
         if (localPos.z < 0 || localPos.z >= VoxelData.ChunkSize) return;
         if (localPos.y < 0 || localPos.y >= VoxelData.ChunkHeight) return;
-
         blocks[localPos.x, localPos.y, localPos.z] = type;
     }
 
@@ -173,7 +171,9 @@ public class Chunk : MonoBehaviour
                     BlockType bt = blocks[x, y, z];
                     if (bt == BlockType.Air) continue;
 
-                    int rot = RotationFor(LocalToWorld(new Vector3Int(x, y, z)));
+                    Vector3Int wpos = LocalToWorld(new Vector3Int(x, y, z));
+                    int topRot = YawFor(wpos);
+                    bool sideFlip = SideFlipFor(wpos);
 
                     Vector3Int local = new Vector3Int(x, y, z);
 
@@ -188,7 +188,19 @@ public class Chunk : MonoBehaviour
                         {
                             int v = VoxelData.Tris[face, i];
                             verts.Add(new Vector3(x, y, z) + VoxelData.Verts[v]);
-                            uvs.Add(RotUV(VoxelData.BaseUVs[i], rot));
+
+                            Vector2 uv = VoxelData.BaseUVs[i];
+
+                            if (face == 2 || face == 3)
+                            {
+                                uv = RotUV(uv, topRot);
+                            }
+                            else
+                            {
+                                if (sideFlip) uv = FlipU(uv);
+                            }
+
+                            uvs.Add(uv);
                         }
 
                         List<int> triList = PickTriList(bt, face, trisGrassTop, trisGrassSide, trisDirt, trisLogTop, trisLogSide, trisLeaves);
@@ -228,11 +240,21 @@ public class Chunk : MonoBehaviour
         meshCollider.sharedMesh = m;
     }
 
-    private int RotationFor(Vector3Int worldPos)
+    private int YawFor(Vector3Int worldPos)
     {
-        int h = world.Hash3(worldPos.x, worldPos.y, worldPos.z);
-        int r = Mathf.Abs(h) & 3;
-        return r;
+        int h = world.Hash3(worldPos.x, 0, worldPos.z);
+        return Mathf.Abs(h) & 3;
+    }
+
+    private bool SideFlipFor(Vector3Int worldPos)
+    {
+        int h = world.Hash3(worldPos.x, 1, worldPos.z);
+        return (Mathf.Abs(h) & 1) == 1;
+    }
+
+    private Vector2 FlipU(Vector2 uv)
+    {
+        return new Vector2(1f - uv.x, uv.y);
     }
 
     private Vector2 RotUV(Vector2 uv, int rot)

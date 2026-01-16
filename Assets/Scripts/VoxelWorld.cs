@@ -52,10 +52,29 @@ public class VoxelWorld : MonoBehaviour
         Random.InitState(settings.seed);
     }
 
-    private void Start()
+private void Start()
+{
+    UpdateWorld(true);
+
+    if (settings.player != null)
     {
-        UpdateWorld(true);
+        var pc = settings.player.GetComponent<PlayerController>();
+        if (pc != null)
+        {
+            pc.PlaceAboveGround(new Vector3(0.5f, 0f, 0.5f), 300f, 0.2f);
+        }
+        else
+        {
+            int h = GetHeight(0, 0);
+            settings.player.position = new Vector3(0.5f, h + 3f, 0.5f);
+        }
     }
+
+    UpdateWorld(true);
+}
+
+
+
 
     private void Update()
     {
