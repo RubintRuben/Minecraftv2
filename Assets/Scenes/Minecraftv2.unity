@@ -758,29 +758,37 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VoxelWorld
   materials:
-    grassTop: {fileID: 2100000, guid: 7d8ee0d9b56148b4495d429751d6c190, type: 2}
-    grassSide: {fileID: 2100000, guid: f747a8246ad4d8d49921a7536331e80d, type: 2}
+    grassTop: {fileID: 2100000, guid: 53aa4cd23ba741342872c3fc45bb7c29, type: 2}
+    grassSide: {fileID: 2100000, guid: ad3d7189e1f7c6a43a6bf2d0245b54c3, type: 2}
     dirt: {fileID: 2100000, guid: db0706277e7d93e4d81a52a6943d1caf, type: 2}
-    stone: {fileID: 2100000, guid: 8485df145c15ce84fbd1feb3726136a7, type: 2}
+    stone: {fileID: 0}
     sand: {fileID: 2100000, guid: 1f5c3aea6ef2cae4b97cff085994eebe, type: 2}
     water: {fileID: 2100000, guid: 401527fc1c028064a99d8f8fd870668f, type: 2}
     logTop: {fileID: 2100000, guid: f5b6103de77332b418c66a3623a933b2, type: 2}
     logSide: {fileID: 2100000, guid: 63805d469f92ee948bf69c251f2dc5f4, type: 2}
-    leaves: {fileID: 2100000, guid: a9ec74df2a60cc849a82f06a9fd77963, type: 2}
-    bedrock: {fileID: 2100000, guid: 5bd4227b180611f4eb65e5170a4a17cc, type: 2}
-    coalOre: {fileID: 2100000, guid: dcf98d6f0e52e2e44a617fb4d10f2eac, type: 2}
-    ironOre: {fileID: 2100000, guid: bf3de63b7bd57484fb56df9afd7a185b, type: 2}
-    redstoneOre: {fileID: 2100000, guid: 8ba06e30d5d9d144fa815d74c0537f84, type: 2}
-    lapisOre: {fileID: 2100000, guid: fe1ce3472e3efee47ad947615a62f5e9, type: 2}
-    diamondOre: {fileID: 2100000, guid: 2633a1aa2311ebf4387dc55c796e2e96, type: 2}
-    emeraldOre: {fileID: 2100000, guid: dbfd1df4c477e5c49a210a076ae7f44b, type: 2}
+    leaves: {fileID: 2100000, guid: 408e391944a628e49ad0cf4c0ced2aa7, type: 2}
+    bedrock: {fileID: 0}
+    coalOre: {fileID: 0}
+    ironOre: {fileID: 0}
+    redstoneOre: {fileID: 0}
+    lapisOre: {fileID: 0}
+    diamondOre: {fileID: 0}
+    emeraldOre: {fileID: 0}
   settings:
     player: {fileID: 709717491}
     viewDistanceInChunks: 10
     seed: 12345
   terrainColliderMaterial: {fileID: 13400000, guid: 6cf2eebc656adab4dbe11164c61a6dba, type: 2}
+  roughness: 0.25
   minecraftLikeWater: 1
+  oceanScale: 0.0018
+  oceanThreshold: 0.52
+  minWaterDepth: 2
   topSoilDepth: 4
+  enableCaves: 1
+  caveScale: 0.045
+  caveThreshold: 0.78
+  caveMinDepthBelowSurface: 6
   sandFalls: 1
   sandChecksPerFrame: 64
   fallingSandSpawnYOffset: 0.15

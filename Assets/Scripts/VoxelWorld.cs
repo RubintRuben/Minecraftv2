@@ -6,13 +6,17 @@ public class VoxelWorld : MonoBehaviour
     public const int SeaLevel = 63;
 
     [System.Serializable]
+    public class BiomeTints
+    {
+        public Color plainsGrass = new Color32(0x91, 0xBD, 0x59, 0xFF);
+        public Color plainsFoliage = new Color32(0x77, 0xAB, 0x2F, 0xFF);
+    }
+
+    [System.Serializable]
     public class BlockMaterials
     {
-        // Tintelt (szürke) textúrákhoz vertex color kell:
-        public Material grassTop;   // TINT shader
-        public Material grassSide;  // DIRT+OVERLAY+TINT shader
-        public Material leaves;     // TINT shader
-
+        public Material grassTop;
+        public Material grassSide;
         public Material dirt;
         public Material stone;
         public Material sand;
@@ -20,6 +24,7 @@ public class VoxelWorld : MonoBehaviour
 
         public Material logTop;
         public Material logSide;
+        public Material leaves;
 
         public Material bedrock;
 
@@ -40,27 +45,26 @@ public class VoxelWorld : MonoBehaviour
     }
 
     public BlockMaterials materials;
+    public BiomeTints biomeTints;
     public WorldSettings settings;
     public PhysicsMaterial terrainColliderMaterial;
 
-    [Header("Biome Tint (colormap)")]
-    public Texture2D grassColorMap;     // ide húzd be a grass_colormap.png-t
-    public Texture2D foliageColorMap;   // ha nincs külön, ugyanaz is jó
-
     [Header("Terrain")]
-    [Range(0f, 1f)] public float roughness = 0.22f;
-    public int topSoilDepth = 4;
+    [Range(0f, 1f)] public float roughness = 0.25f;
 
-    [Header("Ocean / Water")]
+    [Header("Water")]
     public bool minecraftLikeWater = true;
     public float oceanScale = 0.0018f;
     [Range(0f, 1f)] public float oceanThreshold = 0.52f;
     public int minWaterDepth = 2;
 
-    [Header("Caves (banyák)")]
+    [Header("Soil")]
+    public int topSoilDepth = 4;
+
+    [Header("Caves (banya)")]
     public bool enableCaves = true;
     public float caveScale = 0.045f;
-    [Range(0f, 1f)] public float caveThreshold = 0.78f;
+    [Range(0.0f, 1.0f)] public float caveThreshold = 0.78f;
     public int caveMinDepthBelowSurface = 6;
 
     [Header("Sand Physics")]
@@ -72,7 +76,6 @@ public class VoxelWorld : MonoBehaviour
 
     const int ChunkCreateBudgetPerFrame = 2;
 
-    // biome zajok
     const float BiomeTempScale = 0.0017f;
     const float BiomeRainScale = 0.0017f;
     const float BiomeForestScale = 0.0014f;
@@ -84,9 +87,27 @@ public class VoxelWorld : MonoBehaviour
     private readonly Queue<Vector3Int> sandQueue = new Queue<Vector3Int>(4096);
     private readonly HashSet<Vector3Int> sandQueued = new HashSet<Vector3Int>();
 
+    private enum BiomeId
+    {
+        Plains
+    }
+
     private void Awake()
     {
         Random.InitState(settings.seed);
+        if (biomeTints == null) biomeTints = new BiomeTints();
+    }
+
+    public void GetBiomeTintsAt(int worldX, int worldZ, out Color grass, out Color foliage)
+    {
+        BiomeId biome = BiomeId.Plains;
+        switch (biome)
+        {
+            default:
+                grass = biomeTints.plainsGrass;
+                foliage = biomeTints.plainsFoliage;
+                break;
+        }
     }
 
     private void Start()
@@ -124,11 +145,13 @@ public class VoxelWorld : MonoBehaviour
 
         int r = Mathf.Max(1, settings.viewDistanceInChunks);
         for (int dx = -r; dx <= r; dx++)
-        for (int dz = -r; dz <= r; dz++)
         {
-            Vector2Int c = new Vector2Int(playerChunk.x + dx, playerChunk.y + dz);
-            activeChunkCoords.Add(c);
-            if (!chunks.ContainsKey(c)) neededChunks.Add(c);
+            for (int dz = -r; dz <= r; dz++)
+            {
+                Vector2Int c = new Vector2Int(playerChunk.x + dx, playerChunk.y + dz);
+                activeChunkCoords.Add(c);
+                if (!chunks.ContainsKey(c)) neededChunks.Add(c);
+            }
         }
 
         neededChunks.Sort((a, b) =>
@@ -143,7 +166,10 @@ public class VoxelWorld : MonoBehaviour
             CreateChunk(neededChunks[i]);
 
         foreach (var kv in chunks)
-            kv.Value.SetActive(activeChunkCoords.Contains(kv.Key));
+        {
+            bool shouldBeActive = activeChunkCoords.Contains(kv.Key);
+            kv.Value.SetActive(shouldBeActive);
+        }
     }
 
     private void CreateChunk(Vector2Int coord)
@@ -159,7 +185,6 @@ public class VoxelWorld : MonoBehaviour
 
         chunks.Add(coord, chunk);
 
-        // FIX: víz/chunk seam eltüntetés – szomszédok rebuild amikor új chunk jön
         RebuildChunkIfExists(new Vector2Int(coord.x - 1, coord.y));
         RebuildChunkIfExists(new Vector2Int(coord.x + 1, coord.y));
         RebuildChunkIfExists(new Vector2Int(coord.x, coord.y - 1));
@@ -173,7 +198,6 @@ public class VoxelWorld : MonoBehaviour
         return new Vector2Int(cx, cz);
     }
 
-    // ---- BIOME PARAMS ----
     public void GetBiomeParams(int worldX, int worldZ, out float temp, out float rain, out float forest, out float ocean)
     {
         int s = settings.seed;
@@ -182,37 +206,10 @@ public class VoxelWorld : MonoBehaviour
         rain = Mathf.PerlinNoise((worldX + s * 23) * BiomeRainScale, (worldZ + s * 23) * BiomeRainScale);
 
         forest = Mathf.PerlinNoise((worldX + s * 37) * BiomeForestScale, (worldZ + s * 37) * BiomeForestScale);
+
         ocean = Mathf.PerlinNoise((worldX + s * 101) * oceanScale, (worldZ + s * 101) * oceanScale);
     }
 
-    // Minecraft colormap jelleg: new_rain = rain * temp, koordináta invertelve (ténylegesen működik a grass.png-hoz). :contentReference[oaicite:0]{index=0}
-    public Color GetGrassTint(float temp, float rain)
-    {
-        if (grassColorMap == null) return Color.white;
-
-        float t = Mathf.Clamp01(temp);
-        float r = Mathf.Clamp01(rain) * t;
-
-        float u = 1f - t;
-        float v = 1f - r;
-
-        return grassColorMap.GetPixelBilinear(u, v);
-    }
-
-    public Color GetFoliageTint(float temp, float rain)
-    {
-        if (foliageColorMap == null) return GetGrassTint(temp, rain);
-
-        float t = Mathf.Clamp01(temp);
-        float r = Mathf.Clamp01(rain) * t;
-
-        float u = 1f - t;
-        float v = 1f - r;
-
-        return foliageColorMap.GetPixelBilinear(u, v);
-    }
-
-    // ---- HEIGHTMAP (simább fBm) ----
     public int GetLandHeight(int worldX, int worldZ)
     {
         float baseScale = Mathf.Lerp(0.0018f, 0.0105f, roughness);
@@ -235,7 +232,6 @@ public class VoxelWorld : MonoBehaviour
             freq *= lacunarity;
         }
 
-        // ocean maszk lehúzza kicsit a kontinenst
         GetBiomeParams(worldX, worldZ, out _, out _, out _, out float ocean);
         float continental = Mathf.Lerp(0.0f, -0.55f, Mathf.InverseLerp(oceanThreshold, 1.0f, ocean));
         h += continental;
@@ -243,14 +239,14 @@ public class VoxelWorld : MonoBehaviour
         int height = SeaLevel + 6 + Mathf.RoundToInt(h * 60f);
         height = Mathf.Clamp(height, 2, VoxelData.ChunkHeight - 2);
 
-        // pocsolyák ellen: ha nem ocean, ne maradjon 1-2 blockos víz
-        if (minecraftLikeWater && ocean < oceanThreshold && height < SeaLevel - 1)
-            height = SeaLevel - 1;
+        if (minecraftLikeWater && ocean < oceanThreshold)
+        {
+            if (height < SeaLevel - 1) height = SeaLevel - 1;
+        }
 
         return height;
     }
 
-    // ---- CAVES ----
     bool IsCave(int worldX, int worldY, int worldZ, int surfaceY)
     {
         if (!enableCaves) return false;
@@ -262,6 +258,7 @@ public class VoxelWorld : MonoBehaviour
         float a = Mathf.PerlinNoise((worldX + s * 13) * caveScale, (worldZ + s * 13) * caveScale);
         float b = Mathf.PerlinNoise((worldX + s * 29) * caveScale, (worldY + s * 29) * caveScale);
         float c = Mathf.PerlinNoise((worldZ + s * 41) * caveScale, (worldY + s * 41) * caveScale);
+
         float v = (a + b + c) / 3f;
 
         float depth01 = Mathf.InverseLerp(surfaceY, 0, worldY);
@@ -270,17 +267,16 @@ public class VoxelWorld : MonoBehaviour
         return v > t;
     }
 
-    // ---- ORE SETTINGS (1.16 jelleg) ---- :contentReference[oaicite:1]{index=1}
     public void GetOreSettings(out OreSettings o)
     {
         o = new OreSettings
         {
-            coal = new OreLayer(20, 17, 0, 127),
-            iron = new OreLayer(20, 9, 0, 63),
-            redstone = new OreLayer(8, 7, 0, 15),
-            lapis = new OreLayer(1, 7, 0, 31),
-            diamond = new OreLayer(1, 8, 0, 15),
-            emerald = new OreLayer(11, 1, 0, 32) // hegyekben, scattered 1 blokk
+            coal = new OreLayer(countPerChunk: 20, veinSize: 17, yMin: 0, yMax: 127),
+            iron = new OreLayer(countPerChunk: 20, veinSize: 9, yMin: 0, yMax: 63),
+            redstone = new OreLayer(countPerChunk: 8, veinSize: 7, yMin: 0, yMax: 15),
+            diamond = new OreLayer(countPerChunk: 1, veinSize: 8, yMin: 0, yMax: 15),
+            lapis = new OreLayer(countPerChunk: 1, veinSize: 7, yMin: 0, yMax: 31),
+            emerald = new OreLayer(countPerChunk: 11, veinSize: 1, yMin: 0, yMax: 32)
         };
     }
 
@@ -305,22 +301,19 @@ public class VoxelWorld : MonoBehaviour
         public OreLayer coal, iron, redstone, lapis, diamond, emerald;
     }
 
-    // ---- GENERATED BLOCK ----
     public BlockType GetGeneratedBlock(int worldX, int worldY, int worldZ)
     {
         if (worldY < 0 || worldY >= VoxelData.ChunkHeight) return BlockType.Air;
 
-        // bedrock 0..4 random
         if (worldY <= 4)
         {
-            int maxY = 1 + (Mathf.Abs(Hash3(worldX, 0, worldZ)) % 5); // 1..5
+            int maxY = 1 + (Mathf.Abs(Hash3(worldX, 0, worldZ)) % 5);
             if (worldY < maxY) return BlockType.Bedrock;
         }
 
         GetBiomeParams(worldX, worldZ, out _, out _, out _, out float ocean);
         int surfaceY = GetLandHeight(worldX, worldZ);
 
-        // levegő / víz
         if (worldY > surfaceY)
         {
             if (minecraftLikeWater && worldY <= SeaLevel && ocean >= oceanThreshold)
@@ -334,21 +327,25 @@ public class VoxelWorld : MonoBehaviour
         bool underwaterOcean = minecraftLikeWater && ocean >= oceanThreshold && surfaceY < SeaLevel;
 
         if (worldY == surfaceY)
-            return underwaterOcean ? BlockType.Sand : BlockType.Grass;
+        {
+            if (underwaterOcean) return BlockType.Sand;
+            return BlockType.Grass;
+        }
 
         int depthBelow = surfaceY - worldY;
 
         if (depthBelow <= Mathf.Max(1, topSoilDepth))
-            return (underwaterOcean && depthBelow <= 2) ? BlockType.Sand : BlockType.Dirt;
+        {
+            if (underwaterOcean && depthBelow <= 2) return BlockType.Sand;
+            return BlockType.Dirt;
+        }
 
-        // stone + caves
         if (IsCave(worldX, worldY, worldZ, surfaceY))
             return BlockType.Air;
 
         return BlockType.Stone;
     }
 
-    // ---- RUNTIME GET/SET ----
     public BlockType GetBlock(Vector3Int worldPos)
     {
         if (worldPos.y < 0 || worldPos.y >= VoxelData.ChunkHeight) return BlockType.Air;
@@ -358,7 +355,8 @@ public class VoxelWorld : MonoBehaviour
             Mathf.FloorToInt(worldPos.z / (float)VoxelData.ChunkSize)
         );
 
-        if (!chunks.TryGetValue(c, out Chunk chunk)) return BlockType.Air;
+        if (!chunks.TryGetValue(c, out Chunk chunk))
+            return GetGeneratedBlock(worldPos.x, worldPos.y, worldPos.z);
 
         Vector3Int local = chunk.WorldToLocal(worldPos);
         return chunk.GetBlockLocal(local);
@@ -453,7 +451,6 @@ public class VoxelWorld : MonoBehaviour
         fs.world = this;
     }
 
-    // ---- HASH ----
     private int Hash(int x, int z, int seed)
     {
         unchecked

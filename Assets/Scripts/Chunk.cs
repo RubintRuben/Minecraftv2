@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -15,7 +14,6 @@ public class Chunk : MonoBehaviour
     private BlockType[,,] blocks;
     private VoxelWorld.BlockMaterials mats;
 
-    // Submesh sorrend = sharedMaterials sorrend!
     const int SM_GrassTop = 0;
     const int SM_GrassSide = 1;
     const int SM_Dirt = 2;
@@ -52,22 +50,22 @@ public class Chunk : MonoBehaviour
 
         meshRenderer.sharedMaterials = new Material[]
         {
-            mats.grassTop,      // 0
-            mats.grassSide,     // 1
-            mats.dirt,          // 2
-            mats.stone,         // 3
-            mats.sand,          // 4
-            mats.water,         // 5
-            mats.logTop,        // 6
-            mats.logSide,       // 7
-            mats.leaves,        // 8
-            mats.bedrock,       // 9
-            mats.coalOre,       // 10
-            mats.ironOre,       // 11
-            mats.redstoneOre,   // 12
-            mats.lapisOre,      // 13
-            mats.diamondOre,    // 14
-            mats.emeraldOre     // 15
+            mats.grassTop,
+            mats.grassSide,
+            mats.dirt,
+            mats.stone,
+            mats.sand,
+            mats.water,
+            mats.logTop,
+            mats.logSide,
+            mats.leaves,
+            mats.bedrock,
+            mats.coalOre,
+            mats.ironOre,
+            mats.redstoneOre,
+            mats.lapisOre,
+            mats.diamondOre,
+            mats.emeraldOre
         };
 
         blocks = new BlockType[VoxelData.ChunkSize, VoxelData.ChunkHeight, VoxelData.ChunkSize];
@@ -115,22 +113,22 @@ public class Chunk : MonoBehaviour
         blocks[localPos.x, localPos.y, localPos.z] = type;
     }
 
-    // ---------- GENERATION ----------
-
-    void GenerateBaseTerrain()
+    private void GenerateBaseTerrain()
     {
         for (int x = 0; x < VoxelData.ChunkSize; x++)
-        for (int z = 0; z < VoxelData.ChunkSize; z++)
         {
-            int wx = coord.x * VoxelData.ChunkSize + x;
-            int wz = coord.y * VoxelData.ChunkSize + z;
+            for (int z = 0; z < VoxelData.ChunkSize; z++)
+            {
+                int wx = coord.x * VoxelData.ChunkSize + x;
+                int wz = coord.y * VoxelData.ChunkSize + z;
 
-            for (int y = 0; y < VoxelData.ChunkHeight; y++)
-                blocks[x, y, z] = world.GetGeneratedBlock(wx, y, wz);
+                for (int y = 0; y < VoxelData.ChunkHeight; y++)
+                    blocks[x, y, z] = world.GetGeneratedBlock(wx, y, wz);
+            }
         }
     }
 
-    void GenerateOresMinecraftLike()
+    private void GenerateOresMinecraftLike()
     {
         world.GetOreSettings(out var o);
 
@@ -148,7 +146,7 @@ public class Chunk : MonoBehaviour
             PlaceVeins(rng, BlockType.EmeraldOre, o.emerald, emeraldScatter: true);
     }
 
-    int EstimateChunkAverageSurface()
+    private int EstimateChunkAverageSurface()
     {
         int sum = 0;
         int cnt = 0;
@@ -163,7 +161,7 @@ public class Chunk : MonoBehaviour
         return (cnt == 0) ? VoxelWorld.SeaLevel : (sum / cnt);
     }
 
-    void PlaceVeins(System.Random rng, BlockType oreType, VoxelWorld.OreLayer layer, bool triangularY = false, bool emeraldScatter = false)
+    private void PlaceVeins(System.Random rng, BlockType oreType, VoxelWorld.OreLayer layer, bool triangularY = false, bool emeraldScatter = false)
     {
         for (int i = 0; i < layer.countPerChunk; i++)
         {
@@ -173,13 +171,13 @@ public class Chunk : MonoBehaviour
             int y;
             if (triangularY)
             {
-                int a = rng.Next(layer.yMin, Math.Min(layer.yMax + 1, VoxelData.ChunkHeight));
-                int b = rng.Next(layer.yMin, Math.Min(layer.yMax + 1, VoxelData.ChunkHeight));
+                int a = rng.Next(layer.yMin, layer.yMax + 1);
+                int b = rng.Next(layer.yMin, layer.yMax + 1);
                 y = (a + b) / 2;
             }
             else
             {
-                y = rng.Next(layer.yMin, Math.Min(layer.yMax + 1, VoxelData.ChunkHeight));
+                y = rng.Next(layer.yMin, Mathf.Min(layer.yMax + 1, VoxelData.ChunkHeight));
             }
 
             if (y < 1 || y >= VoxelData.ChunkHeight - 1) continue;
@@ -191,8 +189,8 @@ public class Chunk : MonoBehaviour
                 continue;
             }
 
-            int vx = x, vy = y, vz = z;
             int veinSize = Mathf.Max(1, layer.veinSize);
+            int vx = x, vy = y, vz = z;
 
             for (int v = 0; v < veinSize; v++)
             {
@@ -217,50 +215,54 @@ public class Chunk : MonoBehaviour
         }
     }
 
-    void GenerateTreesBiomePatches()
+    private void GenerateTreesBiomePatches()
     {
         for (int x = TreeEdgePadding; x < VoxelData.ChunkSize - TreeEdgePadding; x++)
-        for (int z = TreeEdgePadding; z < VoxelData.ChunkSize - TreeEdgePadding; z++)
         {
-            int wx = coord.x * VoxelData.ChunkSize + x;
-            int wz = coord.y * VoxelData.ChunkSize + z;
+            for (int z = TreeEdgePadding; z < VoxelData.ChunkSize - TreeEdgePadding; z++)
+            {
+                int wx = coord.x * VoxelData.ChunkSize + x;
+                int wz = coord.y * VoxelData.ChunkSize + z;
 
-            world.GetBiomeParams(wx, wz, out float temp, out float rain, out float forest, out float ocean);
-            if (ocean >= world.oceanThreshold) continue;
+                world.GetBiomeParams(wx, wz, out float temp, out float rain, out float forest, out float ocean);
 
-            int surfaceY = world.GetLandHeight(wx, wz);
-            if (surfaceY <= VoxelWorld.SeaLevel + 1) continue;
-            if (surfaceY < 1 || surfaceY >= VoxelData.ChunkHeight - 14) continue;
-            if (blocks[x, surfaceY, z] != BlockType.Grass) continue;
+                if (ocean >= world.oceanThreshold) continue;
 
-            bool isForest = forest > 0.58f;
-            float humidityFactor = Mathf.Lerp(0.55f, 1.0f, rain);
+                int surfaceY = world.GetLandHeight(wx, wz);
+                if (surfaceY <= VoxelWorld.SeaLevel + 1) continue;
+                if (surfaceY < 1 || surfaceY >= VoxelData.ChunkHeight - 10) continue;
+                if (blocks[x, surfaceY, z] != BlockType.Grass) continue;
 
-            float chance = isForest ? (0.024f * humidityFactor) : (0.0045f * humidityFactor);
+                bool isForest = forest > 0.58f;
 
-            // determinisztikus random
-            int h = world.Hash3(wx, surfaceY, wz);
-            float r01 = (Mathf.Abs(h) % 10000) / 10000f;
-            if (r01 > chance) continue;
+                float humidityFactor = Mathf.Lerp(0.55f, 1.0f, rain);
+                float chance = isForest ? (0.030f * humidityFactor) : (0.006f * humidityFactor);
 
-            float bigChance = isForest ? 0.08f : 0.02f;
-            float r02 = (Mathf.Abs(world.Hash3(wx + 17, surfaceY + 3, wz - 9)) % 10000) / 10000f;
-            bool big = r02 < bigChance;
+                int h = world.Hash3(wx, surfaceY, wz);
+                float r01 = (Mathf.Abs(h) % 10000) / 10000f;
+                if (r01 > chance) continue;
 
-            if (big) TryPlaceBigOak(x, surfaceY, z, wx, wz);
-            else TryPlaceSmallOak(x, surfaceY, z, wx, wz);
+                float bigChance = isForest ? 0.10f : 0.03f;
+                float r02 = (Mathf.Abs(world.Hash3(wx + 17, surfaceY + 3, wz - 9)) % 10000) / 10000f;
+                bool big = r02 < bigChance;
+
+                if (big)
+                    TryPlaceBigOak(x, surfaceY, z, wx, wz);
+                else
+                    TryPlaceSmallOak(x, surfaceY, z, wx, wz);
+            }
         }
     }
 
-    bool TryPlaceSmallOak(int x, int surfaceY, int z, int wx, int wz)
+    private bool TryPlaceSmallOak(int x, int surfaceY, int z, int wx, int wz)
     {
-        int trunkH = 4 + (Mathf.Abs(world.Hash3(wx, surfaceY, wz)) % 3); // 4..6
-        int trunkBelowLeaves = 2 + (Mathf.Abs(world.Hash3(wx + 5, surfaceY, wz + 5)) % 2); // 2..3
+        int trunkH = 4 + (Mathf.Abs(world.Hash3(wx, surfaceY, wz)) % 3);
 
+        int trunkBelowLeaves = 2 + (Mathf.Abs(world.Hash3(wx + 5, surfaceY, wz + 5)) % 2);
         int leafBaseY = surfaceY + trunkBelowLeaves;
         int topY = surfaceY + trunkH;
 
-        if (topY + 4 >= VoxelData.ChunkHeight) return false;
+        if (topY + 3 >= VoxelData.ChunkHeight) return false;
 
         for (int y = surfaceY + 1; y <= topY; y++)
             if (blocks[x, y, z] != BlockType.Air) return false;
@@ -276,14 +278,14 @@ public class Chunk : MonoBehaviour
         return true;
     }
 
-    bool TryPlaceBigOak(int x, int surfaceY, int z, int wx, int wz)
+    private bool TryPlaceBigOak(int x, int surfaceY, int z, int wx, int wz)
     {
-        int trunkH = 8 + (Mathf.Abs(world.Hash3(wx, surfaceY, wz)) % 5); // 8..12
+        int trunkH = 8 + (Mathf.Abs(world.Hash3(wx, surfaceY, wz)) % 5);
         int trunkBelowLeaves = 3;
         int leafBaseY = surfaceY + trunkBelowLeaves;
         int topY = surfaceY + trunkH;
 
-        if (topY + 5 >= VoxelData.ChunkHeight) return false;
+        if (topY + 4 >= VoxelData.ChunkHeight) return false;
 
         for (int y = surfaceY + 1; y <= topY; y++)
             if (blocks[x, y, z] != BlockType.Air) return false;
@@ -313,6 +315,7 @@ public class Chunk : MonoBehaviour
                 ax += dx; az += dz;
                 if (ax < 1 || ax >= VoxelData.ChunkSize - 1) break;
                 if (az < 1 || az >= VoxelData.ChunkSize - 1) break;
+                if (by < 1 || by >= VoxelData.ChunkHeight - 1) break;
 
                 if (blocks[ax, by, az] == BlockType.Air)
                     blocks[ax, by, az] = BlockType.Log;
@@ -325,7 +328,7 @@ public class Chunk : MonoBehaviour
         return true;
     }
 
-    void PlaceLeavesSquare(int cx, int cz, int y, int r, bool allowCorners)
+    private void PlaceLeavesSquare(int cx, int cz, int y, int r, bool allowCorners)
     {
         if (y < 0 || y >= VoxelData.ChunkHeight) return;
 
@@ -344,7 +347,7 @@ public class Chunk : MonoBehaviour
         }
     }
 
-    void PlaceLeavesCross(int cx, int cz, int y)
+    private void PlaceLeavesCross(int cx, int cz, int y)
     {
         if (y < 0 || y >= VoxelData.ChunkHeight) return;
 
@@ -365,13 +368,11 @@ public class Chunk : MonoBehaviour
         }
     }
 
-    // ---------- MESH (vertex color tint) ----------
-
     public void Rebuild()
     {
         List<Vector3> verts = new List<Vector3>(8192);
         List<Vector2> uvs = new List<Vector2>(8192);
-        List<Color> colors = new List<Color>(8192);
+        List<Color> cols = new List<Color>(8192);
 
         List<int>[] tris = new List<int>[SubmeshCount];
         for (int i = 0; i < SubmeshCount; i++) tris[i] = new List<int>(8192);
@@ -389,15 +390,10 @@ public class Chunk : MonoBehaviour
             BlockType bt = blocks[x, y, z];
             if (bt == BlockType.Air) continue;
 
-            // biome tint egyszer/blokk (ne face-enként)
             int wx = coord.x * VoxelData.ChunkSize + x;
             int wz = coord.y * VoxelData.ChunkSize + z;
-            world.GetBiomeParams(wx, wz, out float temp, out float rain, out _, out _);
 
-            Color tint = Color.white;
-            bool tintThis = (bt == BlockType.Grass || bt == BlockType.Leaves);
-            if (bt == BlockType.Grass) tint = world.GetGrassTint(temp, rain);
-            else if (bt == BlockType.Leaves) tint = world.GetFoliageTint(temp, rain);
+            world.GetBiomeTintsAt(wx, wz, out Color grassTint, out Color foliageTint);
 
             Vector3Int local = new Vector3Int(x, y, z);
 
@@ -408,24 +404,26 @@ public class Chunk : MonoBehaviour
 
                 if (bt == BlockType.Water)
                 {
-                    // víz: csak levegő felé rajzolunk (ne legyen belső face)
                     if (nb != BlockType.Air) continue;
                 }
                 else
                 {
-                    // solid: levegő vagy víz felé rajzolunk
                     if (nb != BlockType.Air && nb != BlockType.Water) continue;
                 }
+
+                int sub = PickSubmesh(bt, face);
+
+                Color vc = Color.white;
+                if (sub == SM_GrassTop || sub == SM_GrassSide) vc = grassTint;
+                else if (sub == SM_Leaves) vc = foliageTint;
 
                 for (int i = 0; i < 4; i++)
                 {
                     int v = VoxelData.Tris[face, i];
                     verts.Add(new Vector3(x, y, z) + VoxelData.Verts[v]);
                     uvs.Add(VoxelData.BaseUVs[i]);
-                    colors.Add(tintThis ? tint : Color.white);
+                    cols.Add(vc);
                 }
-
-                int sub = PickSubmesh(bt, face);
 
                 tris[sub].Add(vertIndex + 0);
                 tris[sub].Add(vertIndex + 1);
@@ -434,7 +432,6 @@ public class Chunk : MonoBehaviour
                 tris[sub].Add(vertIndex + 2);
                 tris[sub].Add(vertIndex + 3);
 
-                // collider: ne legyen víz
                 if (bt != BlockType.Water)
                 {
                     int baseI = cVertIndex;
@@ -442,14 +439,12 @@ public class Chunk : MonoBehaviour
                     cVerts.Add(verts[verts.Count - 3]);
                     cVerts.Add(verts[verts.Count - 2]);
                     cVerts.Add(verts[verts.Count - 1]);
-
                     cTris.Add(baseI + 0);
                     cTris.Add(baseI + 1);
                     cTris.Add(baseI + 2);
                     cTris.Add(baseI + 0);
                     cTris.Add(baseI + 2);
                     cTris.Add(baseI + 3);
-
                     cVertIndex += 4;
                 }
 
@@ -461,7 +456,7 @@ public class Chunk : MonoBehaviour
         m.indexFormat = (verts.Count > 65000) ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
         m.SetVertices(verts);
         m.SetUVs(0, uvs);
-        m.SetColors(colors);
+        m.SetColors(cols);
         m.subMeshCount = SubmeshCount;
         for (int i = 0; i < SubmeshCount; i++) m.SetTriangles(tris[i], i);
         m.RecalculateNormals();
@@ -478,7 +473,7 @@ public class Chunk : MonoBehaviour
         meshCollider.sharedMesh = cm;
     }
 
-    int PickSubmesh(BlockType bt, int face)
+    private int PickSubmesh(BlockType bt, int face)
     {
         switch (bt)
         {
@@ -507,20 +502,21 @@ public class Chunk : MonoBehaviour
                 return SM_LogSide;
 
             default:
-                return SM_Dirt;
+                return SM_Stone;
         }
     }
 
-    BlockType GetNeighborBlock(Vector3Int neighborLocal)
+    private BlockType GetNeighborBlock(Vector3Int local)
     {
-        if (neighborLocal.x >= 0 && neighborLocal.x < VoxelData.ChunkSize &&
-            neighborLocal.z >= 0 && neighborLocal.z < VoxelData.ChunkSize &&
-            neighborLocal.y >= 0 && neighborLocal.y < VoxelData.ChunkHeight)
+        if (local.y < 0 || local.y >= VoxelData.ChunkHeight) return BlockType.Air;
+
+        if (local.x >= 0 && local.x < VoxelData.ChunkSize &&
+            local.z >= 0 && local.z < VoxelData.ChunkSize)
         {
-            return blocks[neighborLocal.x, neighborLocal.y, neighborLocal.z];
+            return blocks[local.x, local.y, local.z];
         }
 
-        Vector3Int worldPos = LocalToWorld(neighborLocal);
-        return world.GetBlock(worldPos);
+        Vector3Int wp = LocalToWorld(local);
+        return world.GetBlock(wp);
     }
 }
