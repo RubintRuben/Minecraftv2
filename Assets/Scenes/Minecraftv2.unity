@@ -603,6 +603,8 @@ GameObject:
   - component: {fileID: 1849630105}
   - component: {fileID: 1849630107}
   - component: {fileID: 1849630106}
+  - component: {fileID: 1849630108}
+  - component: {fileID: 1849630109}
   m_Layer: 3
   m_Name: Player
   m_TagString: Untagged
@@ -619,7 +621,7 @@ Transform:
   m_GameObject: {fileID: 1849630104}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -108.05241, y: 2.137, z: 17.424446}
+  m_LocalPosition: {x: -108.05241, y: 100, z: 17.424446}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -639,7 +641,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerController
   playerCamera: {fileID: 1948780963}
-  playerLayerName: player
+  playerLayerName: Player
   mouseSensitivity: 0.15
   maxLookAngle: 85
   walkSpeed: 6
@@ -648,18 +650,21 @@ MonoBehaviour:
   groundAcceleration: 30
   airAcceleration: 8
   groundFriction: 12
-  jumpHeight: 1.2
-  gravity: -20
+  mcTicksPerSecond: 20
+  mcGravityPerTick: 0.08
+  mcAirDragPerTick: 0.98
+  mcJumpVelocityPerTick: 0.42
+  mcTerminalFallPerTick: 3.92
   crouchCameraDrop: 0.6
   crouchTransitionSpeed: 12
   visualRoot: {fileID: 0}
   crouchVisualScaleY: 0.75
   crouchEdgeSafety: 1
-  sneakCheckDistance: 0.1
-  sneakProbeInset: 0.5
-  sneakProbeUp: 0.35
+  sneakCheckDistance: 0.35
+  sneakProbeInset: 0.93
+  sneakProbeUp: 0.08
   footEpsilon: 0.02
-  groundCheckDistance: 1
+  groundCheckDistance: 0.2
   groundCheckRadiusFactor: 0.9
   worldMask:
     serializedVersion: 2
@@ -684,11 +689,59 @@ CharacterController:
   serializedVersion: 3
   m_Height: 1.8
   m_Radius: 0.5
-  m_SlopeLimit: 45
-  m_StepOffset: 0.3
+  m_SlopeLimit: 60
+  m_StepOffset: 0.6
   m_SkinWidth: 0.08
   m_MinMoveDistance: 0.001
   m_Center: {x: 0, y: 0, z: 0}
+--- !u!65 &1849630108
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1849630104}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 1, y: 1.8, z: 1}
+  m_Center: {x: 0, y: 0, z: 0}
+--- !u!54 &1849630109
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1849630104}
+  serializedVersion: 5
+  m_Mass: 1
+  m_LinearDamping: 0
+  m_AngularDamping: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 1
+  m_IsKinematic: 0
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
 --- !u!1 &1948780959
 GameObject:
   m_ObjectHideFlags: 0
