@@ -39,10 +39,16 @@ public class VoxelWorld : MonoBehaviour
         public int maxTrunkHeight = 6;
     }
 
+    [Header("Materials")]
     public BlockMaterials materials;
+
+    [Header("World Settings")]
     public WorldSettings settings;
     public TerrainNoise terrain;
     public Trees trees;
+
+    [Header("Physics")]
+    public PhysicsMaterial terrainColliderMaterial; // <-- ezt állítod Inspectorból
 
     private readonly Dictionary<Vector2Int, Chunk> chunks = new Dictionary<Vector2Int, Chunk>();
     private readonly HashSet<Vector2Int> activeChunkCoords = new HashSet<Vector2Int>();
@@ -52,29 +58,26 @@ public class VoxelWorld : MonoBehaviour
         Random.InitState(settings.seed);
     }
 
-private void Start()
-{
-    UpdateWorld(true);
-
-    if (settings.player != null)
+    private void Start()
     {
-        var pc = settings.player.GetComponent<PlayerController>();
-        if (pc != null)
+        UpdateWorld(true);
+
+        if (settings.player != null)
         {
-            pc.PlaceAboveGround(new Vector3(0.5f, 0f, 0.5f), 300f, 0.2f);
+            var pc = settings.player.GetComponent<PlayerController>();
+            if (pc != null)
+            {
+                pc.PlaceAboveGround(new Vector3(0.5f, 0f, 0.5f), 300f, 0.2f);
+            }
+            else
+            {
+                int h = GetHeight(0, 0);
+                settings.player.position = new Vector3(0.5f, h + 3f, 0.5f);
+            }
         }
-        else
-        {
-            int h = GetHeight(0, 0);
-            settings.player.position = new Vector3(0.5f, h + 3f, 0.5f);
-        }
+
+        UpdateWorld(true);
     }
-
-    UpdateWorld(true);
-}
-
-
-
 
     private void Update()
     {

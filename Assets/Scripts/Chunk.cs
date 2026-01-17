@@ -25,6 +25,10 @@ public class Chunk : MonoBehaviour
         meshRenderer = GetComponent<MeshRenderer>();
         meshCollider = GetComponent<MeshCollider>();
 
+        // --- IMPORTANT: terrain physic material ---
+        if (world != null && world.terrainColliderMaterial != null)
+            meshCollider.sharedMaterial = world.terrainColliderMaterial;
+
         meshRenderer.sharedMaterials = new Material[]
         {
             mats.grassTop,
@@ -97,6 +101,7 @@ public class Chunk : MonoBehaviour
             }
         }
 
+        // fák
         for (int x = 2; x < VoxelData.ChunkSize - 2; x++)
         {
             for (int z = 2; z < VoxelData.ChunkSize - 2; z++)
@@ -252,10 +257,7 @@ public class Chunk : MonoBehaviour
         return (Mathf.Abs(h) & 1) == 1;
     }
 
-    private Vector2 FlipU(Vector2 uv)
-    {
-        return new Vector2(1f - uv.x, uv.y);
-    }
+    private Vector2 FlipU(Vector2 uv) => new Vector2(1f - uv.x, uv.y);
 
     private Vector2 RotUV(Vector2 uv, int rot)
     {
