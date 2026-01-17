@@ -12,7 +12,6 @@ public class Chunk : MonoBehaviour
     private MeshCollider meshCollider;
 
     private BlockType[,,] blocks;
-
     private VoxelWorld.BlockMaterials mats;
 
     public void Init(VoxelWorld world, Vector2Int coord, VoxelWorld.BlockMaterials materials)
@@ -25,7 +24,6 @@ public class Chunk : MonoBehaviour
         meshRenderer = GetComponent<MeshRenderer>();
         meshCollider = GetComponent<MeshCollider>();
 
-        // --- IMPORTANT: terrain physic material ---
         if (world != null && world.terrainColliderMaterial != null)
             meshCollider.sharedMaterial = world.terrainColliderMaterial;
 
@@ -36,7 +34,9 @@ public class Chunk : MonoBehaviour
             mats.dirt,
             mats.logTop,
             mats.logSide,
-            mats.leaves
+            mats.leaves,
+            mats.sand,
+            mats.water
         };
 
         blocks = new BlockType[VoxelData.ChunkSize, VoxelData.ChunkHeight, VoxelData.ChunkSize];
@@ -83,6 +83,9 @@ public class Chunk : MonoBehaviour
 
     private void Generate()
     {
+        int wl = VoxelWorld.FixedWaterLevel;
+        bool wEnabled = (world.water != null && world.water.enabled);
+
         for (int x = 0; x < VoxelData.ChunkSize; x++)
         {
             for (int z = 0; z < VoxelData.ChunkSize; z++)
@@ -90,18 +93,58 @@ public class Chunk : MonoBehaviour
                 int wx = coord.x * VoxelData.ChunkSize + x;
                 int wz = coord.y * VoxelData.ChunkSize + z;
 
-                int height = world.GetHeight(wx, wz);
+                int landH = world.GetLandHeight(wx, wz);
+
+                bool waterCol = wEnabled && world.IsWaterColumn(wx, wz);
+                int depth = waterCol ? world.GetWaterDepth(wx, wz) : 0;
+                int bottom = waterCol ? Mathf.Clamp(wl - depth, 1, wl - 2) : int.MaxValue;
+
+                int groundY = waterCol ? bottom : landH;
+
+                bool beach = false;
+                if (!waterCol && wEnabled && world.IsNearWater(wx, wz, world.water.beachRadius))
+                {
+                    if (world.ShouldBeachSand(wx, wz)) beach = true;
+                }
+
+                int dune = 0;
+                if (waterCol)
+                {
+                    float bx = (wx + world.settings.seed * 211) * world.water.bedNoiseScale;
+                    float bz = (wz + world.settings.seed * 211) * world.water.bedNoiseScale;
+                    float b = Mathf.PerlinNoise(bx, bz) - 0.5f;
+                    dune = Mathf.RoundToInt(b * 2f * Mathf.Max(0, world.water.bedDuneAmp));
+                }
+
+                int sandTop = waterCol ? Mathf.Clamp(bottom + dune, 1, wl - 2) : groundY;
 
                 for (int y = 0; y < VoxelData.ChunkHeight; y++)
                 {
-                    if (y > height) blocks[x, y, z] = BlockType.Air;
-                    else if (y == height) blocks[x, y, z] = BlockType.Grass;
-                    else blocks[x, y, z] = BlockType.Dirt;
+                    if (y > groundY)
+                    {
+                        if (waterCol && y <= wl) blocks[x, y, z] = BlockType.Water;
+                        else blocks[x, y, z] = BlockType.Air;
+                    }
+                    else if (y == groundY)
+                    {
+                        if (waterCol)
+                        {
+                            blocks[x, y, z] = (y <= sandTop) ? BlockType.Sand : BlockType.Dirt;
+                        }
+                        else
+                        {
+                            blocks[x, y, z] = beach ? BlockType.Sand : BlockType.Grass;
+                        }
+                    }
+                    else
+                    {
+                        if (waterCol) blocks[x, y, z] = BlockType.Sand;
+                        else blocks[x, y, z] = BlockType.Dirt;
+                    }
                 }
             }
         }
 
-        // fák
         for (int x = 2; x < VoxelData.ChunkSize - 2; x++)
         {
             for (int z = 2; z < VoxelData.ChunkSize - 2; z++)
@@ -109,11 +152,21 @@ public class Chunk : MonoBehaviour
                 int wx = coord.x * VoxelData.ChunkSize + x;
                 int wz = coord.y * VoxelData.ChunkSize + z;
 
-                int groundY = world.GetHeight(wx, wz);
-                if (groundY <= 1 || groundY >= VoxelData.ChunkHeight - 10) continue;
+                int groundY = -1;
+                for (int y = VoxelData.ChunkHeight - 2; y >= 1; y--)
+                {
+                    BlockType bt = blocks[x, y, z];
+                    if (bt != BlockType.Air && bt != BlockType.Water)
+                    {
+                        groundY = y;
+                        break;
+                    }
+                }
 
+                if (groundY <= 1 || groundY >= VoxelData.ChunkHeight - 10) continue;
                 if (!world.ShouldPlaceTree(wx, wz)) continue;
                 if (blocks[x, groundY, z] != BlockType.Grass) continue;
+                if (world.IsWaterColumn(wx, wz)) continue;
 
                 int trunkH = world.GetTreeTrunkHeight(wx, wz);
 
@@ -155,15 +208,15 @@ public class Chunk : MonoBehaviour
 
     public void Rebuild()
     {
-        List<Vector3> verts = new List<Vector3>();
-        List<Vector2> uvs = new List<Vector2>();
+        List<Vector3> verts = new List<Vector3>(8192);
+        List<Vector2> uvs = new List<Vector2>(8192);
 
-        List<int> trisGrassTop = new List<int>();
-        List<int> trisGrassSide = new List<int>();
-        List<int> trisDirt = new List<int>();
-        List<int> trisLogTop = new List<int>();
-        List<int> trisLogSide = new List<int>();
-        List<int> trisLeaves = new List<int>();
+        List<int>[] tris = new List<int>[8];
+        for (int i = 0; i < 8; i++) tris[i] = new List<int>(8192);
+
+        List<Vector3> cVerts = new List<Vector3>(8192);
+        List<int> cTris = new List<int>(8192);
+        int cVertIndex = 0;
 
         int vertIndex = 0;
 
@@ -184,10 +237,18 @@ public class Chunk : MonoBehaviour
 
                     for (int face = 0; face < 6; face++)
                     {
-                        Vector3Int neighbor = local + Vector3Int.RoundToInt(VoxelData.FaceChecks[face]);
-                        BlockType nb = GetNeighborBlock(neighbor);
-
-                        if (nb != BlockType.Air) continue;
+                        if (bt == BlockType.Water)
+                        {
+                            if (face != 2) continue;
+                            BlockType above = GetNeighborBlock(local + Vector3Int.up);
+                            if (above == BlockType.Water) continue;
+                        }
+                        else
+                        {
+                            Vector3Int neighbor = local + Vector3Int.RoundToInt(VoxelData.FaceChecks[face]);
+                            BlockType nb = GetNeighborBlock(neighbor);
+                            if (nb != BlockType.Air && nb != BlockType.Water) continue;
+                        }
 
                         for (int i = 0; i < 4; i++)
                         {
@@ -196,26 +257,39 @@ public class Chunk : MonoBehaviour
 
                             Vector2 uv = VoxelData.BaseUVs[i];
 
-                            if (face == 2 || face == 3)
+                            if (bt != BlockType.Water)
                             {
-                                uv = RotUV(uv, topRot);
-                            }
-                            else
-                            {
-                                if (sideFlip) uv = FlipU(uv);
+                                if (face == 2 || face == 3) uv = RotUV(uv, topRot);
+                                else if (sideFlip) uv = FlipU(uv);
                             }
 
                             uvs.Add(uv);
                         }
 
-                        List<int> triList = PickTriList(bt, face, trisGrassTop, trisGrassSide, trisDirt, trisLogTop, trisLogSide, trisLeaves);
+                        int sub = PickSubmesh(bt, face);
 
-                        triList.Add(vertIndex + 0);
-                        triList.Add(vertIndex + 1);
-                        triList.Add(vertIndex + 2);
-                        triList.Add(vertIndex + 0);
-                        triList.Add(vertIndex + 2);
-                        triList.Add(vertIndex + 3);
+                        tris[sub].Add(vertIndex + 0);
+                        tris[sub].Add(vertIndex + 1);
+                        tris[sub].Add(vertIndex + 2);
+                        tris[sub].Add(vertIndex + 0);
+                        tris[sub].Add(vertIndex + 2);
+                        tris[sub].Add(vertIndex + 3);
+
+                        if (bt != BlockType.Water)
+                        {
+                            int baseI = cVertIndex;
+                            cVerts.Add(verts[verts.Count - 4]);
+                            cVerts.Add(verts[verts.Count - 3]);
+                            cVerts.Add(verts[verts.Count - 2]);
+                            cVerts.Add(verts[verts.Count - 1]);
+                            cTris.Add(baseI + 0);
+                            cTris.Add(baseI + 1);
+                            cTris.Add(baseI + 2);
+                            cTris.Add(baseI + 0);
+                            cTris.Add(baseI + 2);
+                            cTris.Add(baseI + 3);
+                            cVertIndex += 4;
+                        }
 
                         vertIndex += 4;
                     }
@@ -225,24 +299,46 @@ public class Chunk : MonoBehaviour
 
         Mesh m = new Mesh();
         m.indexFormat = (verts.Count > 65000) ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
-
         m.SetVertices(verts);
         m.SetUVs(0, uvs);
-
-        m.subMeshCount = 6;
-        m.SetTriangles(trisGrassTop, 0);
-        m.SetTriangles(trisGrassSide, 1);
-        m.SetTriangles(trisDirt, 2);
-        m.SetTriangles(trisLogTop, 3);
-        m.SetTriangles(trisLogSide, 4);
-        m.SetTriangles(trisLeaves, 5);
-
+        m.subMeshCount = 8;
+        for (int i = 0; i < 8; i++) m.SetTriangles(tris[i], i);
         m.RecalculateNormals();
         m.RecalculateBounds();
-
         meshFilter.sharedMesh = m;
+
+        Mesh cm = new Mesh();
+        cm.indexFormat = (cVerts.Count > 65000) ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
+        cm.SetVertices(cVerts);
+        cm.SetTriangles(cTris, 0);
+        cm.RecalculateNormals();
+        cm.RecalculateBounds();
         meshCollider.sharedMesh = null;
-        meshCollider.sharedMesh = m;
+        meshCollider.sharedMesh = cm;
+    }
+
+    private int PickSubmesh(BlockType bt, int face)
+    {
+        if (bt == BlockType.Water) return 7;
+        if (bt == BlockType.Sand) return 6;
+        if (bt == BlockType.Leaves) return 5;
+
+        if (bt == BlockType.Dirt) return 2;
+
+        if (bt == BlockType.Grass)
+        {
+            if (face == 2) return 0;
+            if (face == 3) return 2;
+            return 1;
+        }
+
+        if (bt == BlockType.Log)
+        {
+            if (face == 2 || face == 3) return 3;
+            return 4;
+        }
+
+        return 2;
     }
 
     private int YawFor(Vector3Int worldPos)
@@ -268,36 +364,6 @@ public class Chunk : MonoBehaviour
         if (rot == 1) return new Vector2(v, 1f - u);
         if (rot == 2) return new Vector2(1f - u, 1f - v);
         return new Vector2(1f - v, u);
-    }
-
-    private List<int> PickTriList(
-        BlockType bt,
-        int face,
-        List<int> grassTop,
-        List<int> grassSide,
-        List<int> dirt,
-        List<int> logTop,
-        List<int> logSide,
-        List<int> leaves)
-    {
-        if (bt == BlockType.Dirt) return dirt;
-
-        if (bt == BlockType.Grass)
-        {
-            if (face == 2) return grassTop;
-            if (face == 3) return dirt;
-            return grassSide;
-        }
-
-        if (bt == BlockType.Log)
-        {
-            if (face == 2 || face == 3) return logTop;
-            return logSide;
-        }
-
-        if (bt == BlockType.Leaves) return leaves;
-
-        return dirt;
     }
 
     private BlockType GetNeighborBlock(Vector3Int neighborLocal)

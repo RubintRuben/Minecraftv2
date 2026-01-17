@@ -6,18 +6,14 @@ public class BlockInteractor : MonoBehaviour
     public VoxelWorld world;
     public float reach = 6f;
 
-    [Header("Place")]
     public BlockType placeType = BlockType.Dirt;
 
-    [Header("Refs")]
     public BlockOutlineMesh outline;
     public PlayerController playerController;
 
-    [Header("Raycast")]
-    public LayerMask hitMask = ~0; 
+    public LayerMask hitMask = ~0;
 
     private Camera cam;
-
     private static readonly RaycastHit[] hitBuf = new RaycastHit[8];
 
     private Vector3Int lastOutlined;
@@ -75,7 +71,8 @@ public class BlockInteractor : MonoBehaviour
             Mathf.FloorToInt(inside.z)
         );
 
-        if (world.GetBlock(targetBlock) == BlockType.Air)
+        BlockType t = world.GetBlock(targetBlock);
+        if (t == BlockType.Air)
         {
             if (outline != null) outline.Hide();
             hadOutline = false;
@@ -94,8 +91,7 @@ public class BlockInteractor : MonoBehaviour
 
         if (Mouse.current.leftButton.wasPressedThisFrame)
         {
-            if (world.GetBlock(targetBlock) != BlockType.Air)
-                world.SetBlock(targetBlock, BlockType.Air);
+            world.SetBlock(targetBlock, BlockType.Air);
         }
 
         if (Mouse.current.rightButton.wasPressedThisFrame)
@@ -107,7 +103,8 @@ public class BlockInteractor : MonoBehaviour
                 Mathf.FloorToInt(place.z)
             );
 
-            if (world.GetBlock(placeBlock) != BlockType.Air) return;
+            BlockType pb = world.GetBlock(placeBlock);
+            if (pb != BlockType.Air && pb != BlockType.Water) return;
 
             if (playerController != null && playerController.IntersectsBlock(placeBlock))
                 return;

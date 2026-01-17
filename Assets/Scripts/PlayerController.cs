@@ -4,8 +4,11 @@ using UnityEngine.InputSystem;
 [RequireComponent(typeof(Rigidbody), typeof(BoxCollider))]
 public class PlayerController : MonoBehaviour
 {
+    public Transform viewYaw;
     public Transform cameraPivot;
     public Camera playerCamera;
+
+    public VoxelWorld world;
 
     public float mouseSensitivity = 0.12f;
     public float maxPitch = 89f;
@@ -21,7 +24,6 @@ public class PlayerController : MonoBehaviour
     public float jumpHeight = 1.25f;
     public float jumpCooldown = 0.08f;
     public bool holdToAutoJump = true;
-
     public float coyoteTime = 0.12f;
     public float jumpBufferTime = 0.12f;
 
@@ -36,26 +38,11 @@ public class PlayerController : MonoBehaviour
     public float crouchCameraDrop = 0.55f;
     public float crouchLerpSpeed = 14f;
 
-    [Header("Sneak / Edge (Minecraft-like)")]
     public bool sneakPreventsFalling = true;
-
-    [Tooltip("Talaj-ellenőrzés a sneakeléshez: vékony BoxCast a talp alatt. (0.15-0.30 jó)")]
-    public float sneakSupportDistance = 0.22f;
-
-    [Tooltip("A talp alatti BoxCast félmagassága. (0.02-0.05 jó)")]
-    public float sneakSupportHalfHeight = 0.03f;
-
-    [Tooltip("A talp lenyomatának XZ szűkítése, hogy ne legyen fals találat peremen/falon. (0.005-0.02)")]
-    public float sneakSupportInset = 0.012f;
-
-    [Tooltip("Ha igaz: sneak közben tényleg ne lehessen leesni a peremről (XZ-t clampeli).")]
-    public bool sneakNeverFall = true;
-
-    [Tooltip("Sneak clamp bináris keresés lépésszám")]
-    public int sneakClampIterations = 14;
-
-    [Tooltip("Minimum elmozdulás küszöb (nagyon kicsinél nulláz)")]
+    public int sneakClampIterations = 16;
     public float sneakMinMove = 0.0004f;
+    public float sneakFootInset = 0.06f;
+    public bool sneakNeverFall = true;
 
     public bool enableStepUp = true;
     public float stepHeight = 0.55f;
@@ -68,6 +55,7 @@ public class PlayerController : MonoBehaviour
     Rigidbody rb;
     BoxCollider box;
 
+    float yaw;
     float pitch;
     Vector2 moveInput;
 
@@ -90,11 +78,6 @@ public class PlayerController : MonoBehaviour
 
     PhysicsMaterial noFrictionMat;
 
-    // sneak “anchor” (utolsó biztos pozíció, amikor volt talaj alatta)
-    Vector3 lastSneakSafePos;
-    float lastSneakSafeTime;
-    bool hasSneakSafe;
-
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
@@ -105,6 +88,14 @@ public class PlayerController : MonoBehaviour
         rb.freezeRotation = true;
         rb.linearDamping = 0f;
         rb.angularDamping = 0f;
+
+        if (world == null) world = Object.FindAnyObjectByType<VoxelWorld>();
+
+        if (viewYaw == null)
+        {
+            Transform t = transform.Find("ViewYaw");
+            if (t != null) viewYaw = t;
+        }
 
         if (cameraPivot == null)
         {
@@ -117,6 +108,9 @@ public class PlayerController : MonoBehaviour
         }
         if (playerCamera == null && cameraPivot != null)
             playerCamera = cameraPivot.GetComponent<Camera>();
+
+        if (viewYaw == null && cameraPivot != null && cameraPivot.parent != null)
+            viewYaw = cameraPivot.parent;
 
         if (cameraPivot != null)
         {
@@ -155,6 +149,9 @@ public class PlayerController : MonoBehaviour
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
         }
+
+        if (viewYaw != null)
+            yaw = viewYaw.eulerAngles.y;
     }
 
     void Update()
@@ -169,11 +166,10 @@ public class PlayerController : MonoBehaviour
 
     void FixedUpdate()
     {
+        transform.rotation = Quaternion.identity;
+
         UpdateGrounded();
         HandleCrouchCollider();
-
-        UpdateSneakSafeAnchor();
-
         HandleMovement();
         if (enableStepUp) HandleStepUp();
         HandleJumpAndGravity();
@@ -205,17 +201,21 @@ public class PlayerController : MonoBehaviour
 
     void HandleLook()
     {
-        if (Mouse.current == null || cameraPivot == null) return;
+        if (Mouse.current == null) return;
 
         Vector2 delta = Mouse.current.delta.ReadValue();
         float mx = delta.x * mouseSensitivity;
         float my = delta.y * mouseSensitivity;
 
-        transform.Rotate(Vector3.up, mx, Space.World);
-
+        yaw += mx;
         pitch -= my;
         pitch = Mathf.Clamp(pitch, -maxPitch, maxPitch);
-        cameraPivot.localRotation = Quaternion.Euler(pitch, 0f, 0f);
+
+        if (viewYaw != null)
+            viewYaw.localRotation = Quaternion.Euler(0f, yaw, 0f);
+
+        if (cameraPivot != null)
+            cameraPivot.localRotation = Quaternion.Euler(pitch, 0f, 0f);
     }
 
     void HandleCrouchVisuals()
@@ -266,7 +266,7 @@ public class PlayerController : MonoBehaviour
         Vector3 origin = b.center;
         int mask = groundMask & ~(1 << gameObject.layer);
 
-        return !Physics.BoxCast(origin, half, Vector3.up, out _, transform.rotation, grow, mask, QueryTriggerInteraction.Ignore);
+        return !Physics.BoxCast(origin, half, Vector3.up, out _, Quaternion.identity, grow, mask, QueryTriggerInteraction.Ignore);
     }
 
     void HandleMovement()
@@ -276,7 +276,9 @@ public class PlayerController : MonoBehaviour
         else if (sprintHeld) speed = sprintSpeed;
 
         Vector3 input = new Vector3(moveInput.x, 0f, moveInput.y);
-        Vector3 wishDir = transform.TransformDirection(input);
+
+        Quaternion yawRot = Quaternion.Euler(0f, yaw, 0f);
+        Vector3 wishDir = yawRot * input;
         if (wishDir.sqrMagnitude > 1f) wishDir.Normalize();
 
         Vector3 v = rb.linearVelocity;
@@ -297,68 +299,73 @@ public class PlayerController : MonoBehaviour
 
         Vector3 nextXZ = vXZ + accelVec;
 
-        // >>> Minecraft-szerű sneak: ne groundedhez kösd, hanem "van-e talaj a talpad alatt?"
-        bool supportNow = HasSupportAt(rb.position);
-
-        if (sneakPreventsFalling && crouchHeld && nextXZ.sqrMagnitude > 0.0000001f)
+        if (sneakPreventsFalling && crouchHeld && isGrounded && nextXZ.sqrMagnitude > 0.0000001f && world != null)
         {
             Vector3 disp = nextXZ * Time.fixedDeltaTime;
 
-            // ha van support most, akkor perem-clamp
-            if (supportNow)
-            {
-                Vector3 allowed = SolveSneakDisplacement(rb.position, disp);
-                Vector3 vel = allowed / Time.fixedDeltaTime;
-                rb.linearVelocity = new Vector3(vel.x, v.y, vel.z);
-                return;
-            }
+            int yBelowLocked = GetLockedYBelowAt(rb.position);
+            Vector3 allowed = SolveSneakDisplacementLockedY(rb.position, disp, yBelowLocked);
 
-            // ha épp nincs support (perem-jitter / 1 frame drop), de volt nemrég, akkor "NE ESEK LE"
-            if (sneakNeverFall && hasSneakSafe && (Time.time - lastSneakSafeTime) <= Mathf.Max(0.05f, coyoteTime))
-            {
-                // próbáljuk a mozgást az utolsó safe XZ-hez kötve: ne menjünk le a peremről
-                Vector3 pos = rb.position;
-                Vector3 safe = lastSneakSafePos;
-
-                // engedjük a mozgást, amíg a safe-hoz képest nem megy "kifelé"
-                // legegyszerűbb: csak nullázzuk az XZ-t ebben a frame-ben (ez szünteti a leesést)
-                rb.linearVelocity = new Vector3(0f, v.y, 0f);
-                return;
-            }
+            Vector3 vel = allowed / Time.fixedDeltaTime;
+            rb.linearVelocity = new Vector3(vel.x, v.y, vel.z);
+            return;
         }
 
         rb.linearVelocity = new Vector3(nextXZ.x, v.y, nextXZ.z);
     }
 
-    Vector3 SolveSneakDisplacement(Vector3 pos, Vector3 disp)
+    int GetLockedYBelowAt(Vector3 pos)
     {
-        if (HasSupportAt(pos + disp)) return disp;
+        Bounds b = GetBoundsAtPosition(pos);
+        float footY = b.min.y + 0.001f;
+        return Mathf.FloorToInt(footY - 0.002f);
+    }
+
+    Bounds GetBoundsAtPosition(Vector3 pos)
+    {
+        Vector3 s = transform.lossyScale;
+        Vector3 size = new Vector3(box.size.x * s.x, box.size.y * s.y, box.size.z * s.z);
+        Vector3 center = new Vector3(box.center.x * s.x, box.center.y * s.y, box.center.z * s.z);
+        Bounds b = new Bounds(pos + center, size);
+        return b;
+    }
+
+    Vector3 SolveSneakDisplacementLockedY(Vector3 pos, Vector3 disp, int yBelowLocked)
+    {
+        if (HasSupportLockedY(pos + disp, yBelowLocked)) return disp;
 
         Vector3 dispX = new Vector3(disp.x, 0f, 0f);
         Vector3 dispZ = new Vector3(0f, 0f, disp.z);
 
-        Vector3 allowedX = ClampAlong(pos, dispX);
-        Vector3 pos2 = pos + allowedX;
-        Vector3 allowedZ = ClampAlong(pos2, dispZ);
+        Vector3 ax1 = ClampAlongLockedY(pos, dispX, yBelowLocked);
+        Vector3 p1 = pos + ax1;
+        Vector3 az1 = ClampAlongLockedY(p1, dispZ, yBelowLocked);
+        Vector3 total1 = ax1 + az1;
 
-        Vector3 total = allowedX + allowedZ;
+        Vector3 az2 = ClampAlongLockedY(pos, dispZ, yBelowLocked);
+        Vector3 p2 = pos + az2;
+        Vector3 ax2 = ClampAlongLockedY(p2, dispX, yBelowLocked);
+        Vector3 total2 = az2 + ax2;
+
+        Vector3 total = (total2.sqrMagnitude > total1.sqrMagnitude) ? total2 : total1;
 
         if (total.sqrMagnitude < sneakMinMove * sneakMinMove) return Vector3.zero;
         return total;
     }
 
-    Vector3 ClampAlong(Vector3 pos, Vector3 dispAxis)
+    Vector3 ClampAlongLockedY(Vector3 pos, Vector3 dispAxis, int yBelowLocked)
     {
         if (dispAxis.sqrMagnitude < 0.0000001f) return Vector3.zero;
-        if (HasSupportAt(pos + dispAxis)) return dispAxis;
+        if (HasSupportLockedY(pos + dispAxis, yBelowLocked)) return dispAxis;
 
         float lo = 0f;
         float hi = 1f;
 
-        for (int i = 0; i < Mathf.Max(1, sneakClampIterations); i++)
+        int it = Mathf.Max(1, sneakClampIterations);
+        for (int i = 0; i < it; i++)
         {
             float mid = (lo + hi) * 0.5f;
-            if (HasSupportAt(pos + dispAxis * mid)) lo = mid;
+            if (HasSupportLockedY(pos + dispAxis * mid, yBelowLocked)) lo = mid;
             else hi = mid;
         }
 
@@ -367,56 +374,33 @@ public class PlayerController : MonoBehaviour
         return r;
     }
 
-    // >>> Stabil support check: vékony BoxCast a talp alatt (nem sarok-ray, nem fal)
-    bool HasSupportAt(Vector3 worldPos)
+    bool HasSupportLockedY(Vector3 worldPos, int yBelowLocked)
     {
-        // collider world center/half a megadott pos alapján
-        Vector3 scale = transform.lossyScale;
-        Vector3 halfFull = Vector3.Scale(box.size * 0.5f, new Vector3(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z)));
-        Vector3 centerOffset = Vector3.Scale(box.center, new Vector3(scale.x, scale.y, scale.z));
-        Vector3 center = worldPos + transform.rotation * centerOffset;
+        Bounds b = GetBoundsAtPosition(worldPos);
 
-        // talp-lenyomat XZ (kicsit szűkítve)
-        float hx = Mathf.Max(0.01f, halfFull.x - sneakSupportInset);
-        float hz = Mathf.Max(0.01f, halfFull.z - sneakSupportInset);
+        float inset = Mathf.Clamp(sneakFootInset, 0.0f, Mathf.Min(b.extents.x, b.extents.z) - 0.001f);
 
-        // nagyon vékony talp
-        float hy = Mathf.Clamp(sneakSupportHalfHeight, 0.01f, 0.10f);
+        float ySample = b.min.y + 0.001f;
 
-        // a cast origint a talp fölé tesszük
-        float footY = center.y - halfFull.y;
-        Vector3 origin = new Vector3(center.x, footY + 0.08f + hy, center.z);
-        Vector3 half = new Vector3(hx, hy, hz);
+        Vector3 pC = new Vector3(b.center.x, ySample, b.center.z);
+        Vector3 p00 = new Vector3(b.min.x + inset, ySample, b.min.z + inset);
+        Vector3 p10 = new Vector3(b.max.x - inset, ySample, b.min.z + inset);
+        Vector3 p01 = new Vector3(b.min.x + inset, ySample, b.max.z - inset);
+        Vector3 p11 = new Vector3(b.max.x - inset, ySample, b.max.z - inset);
 
-        int mask = groundMask & ~(1 << gameObject.layer);
-
-        return Physics.BoxCast(
-            origin,
-            half,
-            Vector3.down,
-            out _,
-            transform.rotation,
-            Mathf.Max(0.02f, sneakSupportDistance),
-            mask,
-            QueryTriggerInteraction.Ignore
-        );
+        return IsSolidBelowLockedY(pC, yBelowLocked) ||
+               IsSolidBelowLockedY(p00, yBelowLocked) ||
+               IsSolidBelowLockedY(p10, yBelowLocked) ||
+               IsSolidBelowLockedY(p01, yBelowLocked) ||
+               IsSolidBelowLockedY(p11, yBelowLocked);
     }
 
-    void UpdateSneakSafeAnchor()
+    bool IsSolidBelowLockedY(Vector3 p, int yBelowLocked)
     {
-        if (!sneakPreventsFalling || !crouchHeld)
-        {
-            hasSneakSafe = false;
-            return;
-        }
-
-        // Csak akkor frissítjük, ha tényleg van talaj ALATT (így falnál nem “ragad rá”)
-        if (HasSupportAt(rb.position))
-        {
-            lastSneakSafePos = rb.position;
-            lastSneakSafeTime = Time.time;
-            hasSneakSafe = true;
-        }
+        int x = Mathf.FloorToInt(p.x);
+        int z = Mathf.FloorToInt(p.z);
+        BlockType bt = world.GetBlock(new Vector3Int(x, yBelowLocked, z));
+        return bt != BlockType.Air;
     }
 
     void HandleStepUp()
@@ -442,11 +426,11 @@ public class PlayerController : MonoBehaviour
 
         int mask = stepMask & ~(1 << gameObject.layer);
 
-        bool hitLow = Physics.BoxCast(baseOrigin, halfLow, dir, out _, transform.rotation, stepForward, mask, QueryTriggerInteraction.Ignore);
+        bool hitLow = Physics.BoxCast(baseOrigin, halfLow, dir, out _, Quaternion.identity, stepForward, mask, QueryTriggerInteraction.Ignore);
         if (!hitLow) return;
 
         Vector3 highOrigin = baseOrigin + Vector3.up * stepHeight;
-        bool hitHigh = Physics.BoxCast(highOrigin, halfLow, dir, out _, transform.rotation, stepForward, mask, QueryTriggerInteraction.Ignore);
+        bool hitHigh = Physics.BoxCast(highOrigin, halfLow, dir, out _, Quaternion.identity, stepForward, mask, QueryTriggerInteraction.Ignore);
         if (hitHigh) return;
 
         Vector3 p = rb.position;
@@ -501,14 +485,20 @@ public class PlayerController : MonoBehaviour
         Vector3 origin = b.center;
         int mask = groundMask & ~(1 << gameObject.layer);
 
-        bool g1 = Physics.BoxCast(origin, half, Vector3.down, out _, transform.rotation, groundCheckDistance, mask, QueryTriggerInteraction.Ignore);
+        bool g1 = Physics.BoxCast(origin, half, Vector3.down, out _, Quaternion.identity, groundCheckDistance, mask, QueryTriggerInteraction.Ignore);
         bool g2 = Physics.Raycast(new Vector3(origin.x, b.min.y + 0.06f, origin.z), Vector3.down, out _, groundCheckDistance + 0.10f, mask, QueryTriggerInteraction.Ignore);
 
-        isGrounded = g1 || g2;
+        bool gridSupport = false;
+        if (world != null)
+        {
+            int yBelowLocked = GetLockedYBelowAt(rb.position);
+            gridSupport = HasSupportLockedY(rb.position, yBelowLocked);
+        }
+
+        isGrounded = g1 || g2 || gridSupport;
         if (isGrounded) lastGroundedTime = Time.time;
     }
 
-    // >>> Lerakás: a régi Expand(0.02f) túl szigorú volt, peremen blokkol.
     public bool IntersectsBlock(Vector3Int blockPos)
     {
         Bounds playerB = box.bounds;
@@ -564,3 +554,4 @@ public class PlayerController : MonoBehaviour
         }
     }
 }
+    

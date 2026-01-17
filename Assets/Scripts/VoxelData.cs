@@ -3,7 +3,7 @@ using UnityEngine;
 public static class VoxelData
 {
     public const int ChunkSize = 16;
-    public const int ChunkHeight = 64;
+    public const int ChunkHeight = 128;
 
     public static readonly Vector3[] Verts = new Vector3[8]
     {
@@ -52,5 +52,7 @@ public enum BlockType : byte
     Dirt = 1,
     Grass = 2,
     Log = 3,
-    Leaves = 4
+    Leaves = 4,
+    Sand = 5,
+    Water = 6
 }
