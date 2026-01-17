@@ -89,7 +89,7 @@ public class PlayerController : MonoBehaviour
         rb.linearDamping = 0f;
         rb.angularDamping = 0f;
 
-        if (world == null) world = Object.FindAnyObjectByType<VoxelWorld>();
+        if (world == null) world = Object.FindFirstObjectByType<VoxelWorld>();
 
         if (viewYaw == null)
         {
@@ -554,4 +554,3 @@ public class PlayerController : MonoBehaviour
         }
     }
 }
-    

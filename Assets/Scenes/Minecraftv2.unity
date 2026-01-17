@@ -559,6 +559,38 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1814387289}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &690022392
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 690022393}
+  m_Layer: 3
+  m_Name: ViewYaw
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &690022393
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 690022392}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 1.6, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 1814387289}
+  m_Father: {fileID: 709717491}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &709717487
 GameObject:
   m_ObjectHideFlags: 0
@@ -590,18 +622,20 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c3f6c0dc24079d24a90e185f5ef137c8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerController
+  viewYaw: {fileID: 690022393}
   cameraPivot: {fileID: 1814387289}
   playerCamera: {fileID: 649703234}
+  world: {fileID: 1172525743}
   mouseSensitivity: 2
   maxPitch: 89
   lockCursor: 1
-  walkSpeed: 5
-  sprintSpeed: 8.5
+  walkSpeed: 7
+  sprintSpeed: 10
   crouchSpeed: 2.6
   groundAcceleration: 35
   airAcceleration: 18
   maxAirSpeed: 6
-  jumpHeight: 2
+  jumpHeight: 1.1
   jumpCooldown: 0.08
   holdToAutoJump: 1
   coyoteTime: 0.12
@@ -617,13 +651,10 @@ MonoBehaviour:
   crouchCameraDrop: 0.55
   crouchLerpSpeed: 14
   sneakPreventsFalling: 1
-  supportProbeDown: 0.35
-  supportInset: 0.06
   sneakClampIterations: 10
   sneakMinMove: 0.0005
-  sneakUseGroundCoyote: 1
-  sneakSupportHalfHeight: 0.03
-  sneakSupportCheckDistance: 0.3
+  sneakFootInset: 0.06
+  sneakNeverFall: 1
   enableStepUp: 1
   stepHeight: 0.6
   stepForward: 0.22
@@ -693,7 +724,7 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 1814387289}
+  - {fileID: 690022393}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1172525741
@@ -706,6 +737,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1172525744}
   - component: {fileID: 1172525743}
+  - component: {fileID: 1172525745}
   m_Layer: 0
   m_Name: World
   m_TagString: Untagged
@@ -729,23 +761,31 @@ MonoBehaviour:
     grassTop: {fileID: 2100000, guid: 7d8ee0d9b56148b4495d429751d6c190, type: 2}
     grassSide: {fileID: 2100000, guid: f747a8246ad4d8d49921a7536331e80d, type: 2}
     dirt: {fileID: 2100000, guid: db0706277e7d93e4d81a52a6943d1caf, type: 2}
+    stone: {fileID: 2100000, guid: 8485df145c15ce84fbd1feb3726136a7, type: 2}
+    sand: {fileID: 2100000, guid: 1f5c3aea6ef2cae4b97cff085994eebe, type: 2}
+    water: {fileID: 2100000, guid: 401527fc1c028064a99d8f8fd870668f, type: 2}
     logTop: {fileID: 2100000, guid: f5b6103de77332b418c66a3623a933b2, type: 2}
     logSide: {fileID: 2100000, guid: 63805d469f92ee948bf69c251f2dc5f4, type: 2}
     leaves: {fileID: 2100000, guid: a9ec74df2a60cc849a82f06a9fd77963, type: 2}
+    bedrock: {fileID: 2100000, guid: 5bd4227b180611f4eb65e5170a4a17cc, type: 2}
+    coalOre: {fileID: 2100000, guid: dcf98d6f0e52e2e44a617fb4d10f2eac, type: 2}
+    ironOre: {fileID: 2100000, guid: bf3de63b7bd57484fb56df9afd7a185b, type: 2}
+    redstoneOre: {fileID: 2100000, guid: 8ba06e30d5d9d144fa815d74c0537f84, type: 2}
+    lapisOre: {fileID: 2100000, guid: fe1ce3472e3efee47ad947615a62f5e9, type: 2}
+    diamondOre: {fileID: 2100000, guid: 2633a1aa2311ebf4387dc55c796e2e96, type: 2}
+    emeraldOre: {fileID: 2100000, guid: dbfd1df4c477e5c49a210a076ae7f44b, type: 2}
   settings:
     player: {fileID: 709717491}
     viewDistanceInChunks: 10
     seed: 12345
-  terrain:
-    noiseScale: 0.03
-    baseHeight: 24
-    heightAmplitude: 16
-  trees:
-    enabled: 1
-    chancePercent: 3
-    minTrunkHeight: 4
-    maxTrunkHeight: 6
   terrainColliderMaterial: {fileID: 13400000, guid: 6cf2eebc656adab4dbe11164c61a6dba, type: 2}
+  minecraftLikeWater: 1
+  topSoilDepth: 4
+  sandFalls: 1
+  sandChecksPerFrame: 64
+  fallingSandSpawnYOffset: 0.15
+  fallingSandLinearDrag: 0.05
+  fallingSandAngularDrag: 0.05
 --- !u!4 &1172525744
 Transform:
   m_ObjectHideFlags: 0
@@ -761,6 +801,22 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1172525745
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1172525741}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b841c7340a8a4f44fbaf101445b8e9b8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::WaterTextureAnimator
+  waterMaterial: {fileID: 2100000, guid: 401527fc1c028064a99d8f8fd870668f, type: 2}
+  frameSize: 16
+  frames: 32
+  fps: 8
 --- !u!1 &1426906494
 GameObject:
   m_ObjectHideFlags: 0
@@ -912,13 +968,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1814387288}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 1.6, z: 0}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 649703238}
-  m_Father: {fileID: 709717491}
+  m_Father: {fileID: 690022393}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:

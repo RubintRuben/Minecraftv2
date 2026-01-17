@@ -49,10 +49,22 @@ public static class VoxelData
 public enum BlockType : byte
 {
     Air = 0,
-    Dirt = 1,
-    Grass = 2,
-    Log = 3,
-    Leaves = 4,
-    Sand = 5,
-    Water = 6
+
+    Grass = 1,
+    Dirt = 2,
+    Stone = 3,
+    Sand = 4,
+    Water = 5,
+
+    Log = 6,
+    Leaves = 7,
+
+    Bedrock = 8,
+
+    CoalOre = 9,
+    IronOre = 10,
+    RedstoneOre = 11,
+    LapisOre = 12,
+    DiamondOre = 13,
+    EmeraldOre = 14
 }
