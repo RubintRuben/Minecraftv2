@@ -6,19 +6,42 @@ public class Chunk : MonoBehaviour
 {
     private VoxelWorld world;
     private Vector2Int coord;
+
     private MeshFilter meshFilter;
     private MeshRenderer meshRenderer;
     private MeshCollider meshCollider;
+
     private BlockType[,,] blocks;
     private VoxelWorld.BlockMaterials mats;
 
+    const int SM_GrassTop = 0;
+    const int SM_GrassSide = 1;
+    const int SM_Dirt = 2;
+    const int SM_Stone = 3;
+    const int SM_Sand = 4;
+    const int SM_Water = 5;
+    const int SM_LogTop = 6;
+    const int SM_LogSide = 7;
+    const int SM_Leaves = 8;
+    const int SM_Bedrock = 9;
+    const int SM_Coal = 10;
+    const int SM_Iron = 11;
+    const int SM_Gold = 12;
+    const int SM_Redstone = 13;
+    const int SM_Lapis = 14;
+    const int SM_Diamond = 15;
+    const int SM_Emerald = 16;
+
     const int SubmeshCount = 17;
+
+    const int TreeEdgePadding = 2;
 
     public void Init(VoxelWorld world, Vector2Int coord, VoxelWorld.BlockMaterials materials)
     {
         this.world = world;
         this.coord = coord;
         mats = materials;
+
         meshFilter = GetComponent<MeshFilter>();
         meshRenderer = GetComponent<MeshRenderer>();
         meshCollider = GetComponent<MeshCollider>();
@@ -28,32 +51,52 @@ public class Chunk : MonoBehaviour
 
         meshRenderer.sharedMaterials = new Material[]
         {
-            mats.grassTop, mats.grassSide, mats.dirt, mats.stone, mats.sand, mats.water,
-            mats.logTop, mats.logSide, mats.leaves, mats.bedrock,
-            mats.coalOre, mats.ironOre, mats.redstoneOre, mats.lapisOre,
-            mats.diamondOre, mats.emeraldOre, mats.goldOre
+            mats.grassTop,
+            mats.grassSide,
+            mats.dirt,
+            mats.stone,
+            mats.sand,
+            mats.water,
+            mats.logTop,
+            mats.logSide,
+            mats.leaves,
+            mats.bedrock,
+            mats.coalOre,
+            mats.ironOre,
+            mats.goldOre,
+            mats.redstoneOre,
+            mats.lapisOre,
+            mats.diamondOre,
+            mats.emeraldOre
         };
 
         blocks = new BlockType[VoxelData.ChunkSize, VoxelData.ChunkHeight, VoxelData.ChunkSize];
+
         GenerateBaseTerrain();
-        GenerateOres();
-        GenerateTrees();
+        GenerateOresMinecraftLike();
+        GenerateTreesBiomePatches();
+
         Rebuild();
     }
 
     public void SetActive(bool active)
     {
-        if (gameObject.activeSelf != active) gameObject.SetActive(active);
+        if (gameObject.activeSelf != active)
+            gameObject.SetActive(active);
     }
 
     public Vector3Int WorldToLocal(Vector3Int worldPos)
     {
-        return new Vector3Int(worldPos.x - coord.x * VoxelData.ChunkSize, worldPos.y, worldPos.z - coord.y * VoxelData.ChunkSize);
+        int lx = worldPos.x - coord.x * VoxelData.ChunkSize;
+        int lz = worldPos.z - coord.y * VoxelData.ChunkSize;
+        return new Vector3Int(lx, worldPos.y, lz);
     }
 
     public Vector3Int LocalToWorld(Vector3Int localPos)
     {
-        return new Vector3Int(localPos.x + coord.x * VoxelData.ChunkSize, localPos.y, localPos.z + coord.y * VoxelData.ChunkSize);
+        int wx = localPos.x + coord.x * VoxelData.ChunkSize;
+        int wz = localPos.z + coord.y * VoxelData.ChunkSize;
+        return new Vector3Int(wx, localPos.y, wz);
     }
 
     public BlockType GetBlockLocal(Vector3Int localPos)
@@ -75,124 +118,285 @@ public class Chunk : MonoBehaviour
     private void GenerateBaseTerrain()
     {
         for (int x = 0; x < VoxelData.ChunkSize; x++)
-        for (int z = 0; z < VoxelData.ChunkSize; z++)
+        {
+            for (int z = 0; z < VoxelData.ChunkSize; z++)
+            {
+                int wx = coord.x * VoxelData.ChunkSize + x;
+                int wz = coord.y * VoxelData.ChunkSize + z;
+
+                for (int y = 0; y < VoxelData.ChunkHeight; y++)
+                    blocks[x, y, z] = world.GetGeneratedBlock(wx, y, wz);
+            }
+        }
+    }
+
+    private void GenerateOresMinecraftLike()
+    {
+        world.GetOreSettings(out var o);
+
+        int chunkSeed = world.Hash3(coord.x, 0, coord.y);
+        System.Random rng = new System.Random(chunkSeed);
+
+        PlaceVeins(rng, BlockType.CoalOre, o.coal);
+        PlaceVeins(rng, BlockType.IronOre, o.iron);
+        PlaceVeins(rng, BlockType.GoldOre, o.gold, triangularY: true);
+        PlaceVeins(rng, BlockType.LapisOre, o.lapis, triangularY: true);
+        PlaceVeins(rng, BlockType.RedstoneOre, o.redstone);
+        PlaceVeins(rng, BlockType.DiamondOre, o.diamond);
+
+        int avgSurface = EstimateChunkAverageSurface();
+        if (avgSurface >= VoxelWorld.SeaLevel + 22)
+            PlaceVeins(rng, BlockType.EmeraldOre, o.emerald, emeraldScatter: true);
+    }
+
+    private int EstimateChunkAverageSurface()
+    {
+        int sum = 0;
+        int cnt = 0;
+        for (int x = 0; x < VoxelData.ChunkSize; x += 4)
+        for (int z = 0; z < VoxelData.ChunkSize; z += 4)
         {
             int wx = coord.x * VoxelData.ChunkSize + x;
             int wz = coord.y * VoxelData.ChunkSize + z;
-            for (int y = 0; y < VoxelData.ChunkHeight; y++)
-                blocks[x, y, z] = world.GetGeneratedBlock(wx, y, wz);
+            sum += world.GetLandHeight(wx, wz);
+            cnt++;
         }
+        return (cnt == 0) ? VoxelWorld.SeaLevel : (sum / cnt);
     }
 
-    private void GenerateOres()
+    private void PlaceVeins(System.Random rng, BlockType oreType, VoxelWorld.OreLayer layer, bool triangularY = false, bool emeraldScatter = false)
     {
-        System.Random rng = new System.Random(world.Hash3(coord.x, 0, coord.y));
-        
-        GenerateVein(rng, BlockType.CoalOre, 20, 17, 0, 127);
-        GenerateVein(rng, BlockType.IronOre, 20, 9, 0, 63);
-        GenerateVein(rng, BlockType.GoldOre, 2, 9, 0, 31);
-        GenerateVein(rng, BlockType.RedstoneOre, 8, 8, 0, 15);
-        GenerateVein(rng, BlockType.LapisOre, 1, 7, 0, 31);
-        GenerateVein(rng, BlockType.DiamondOre, 1, 8, 0, 15);
+        int yMin = Mathf.Clamp(layer.yMin, 0, VoxelData.ChunkHeight - 1);
+        int yMax = Mathf.Clamp(layer.yMax, 0, VoxelData.ChunkHeight - 1);
+        if (yMax < yMin) { int t = yMin; yMin = yMax; yMax = t; }
 
-        if (world.GetBiome(coord.x * VoxelData.ChunkSize, coord.y * VoxelData.ChunkSize) == VoxelWorld.BiomeType.Mountains)
-        {
-            GenerateVein(rng, BlockType.EmeraldOre, 5, 1, 32, 127);
-        }
-    }
-
-    private void GenerateVein(System.Random rng, BlockType type, int attempts, int size, int minH, int maxH)
-    {
-        for (int i = 0; i < attempts; i++)
+        for (int i = 0; i < layer.countPerChunk; i++)
         {
             int x = rng.Next(0, VoxelData.ChunkSize);
             int z = rng.Next(0, VoxelData.ChunkSize);
-            int y = rng.Next(minH, maxH + 1);
-            if (y >= VoxelData.ChunkHeight) continue;
+
+            int y;
+            if (triangularY)
+            {
+                int a = rng.Next(yMin, yMax + 1);
+                int b = rng.Next(yMin, yMax + 1);
+                y = (a + b) / 2;
+            }
+            else
+            {
+                y = rng.Next(yMin, yMax + 1);
+            }
+
+            if (y < 1 || y >= VoxelData.ChunkHeight - 1) continue;
+
+            if (emeraldScatter)
+            {
+                if (blocks[x, y, z] == BlockType.Stone)
+                    blocks[x, y, z] = oreType;
+                continue;
+            }
+
+            int veinSize = Mathf.Max(1, layer.veinSize);
 
             int vx = x, vy = y, vz = z;
-            for (int j = 0; j < size; j++)
+            int steps = veinSize + rng.Next(0, Mathf.Max(1, veinSize / 2));
+
+            for (int v = 0; v < steps; v++)
             {
-                if (vx >= 0 && vx < VoxelData.ChunkSize && vz >= 0 && vz < VoxelData.ChunkSize && vy >= 0 && vy < VoxelData.ChunkHeight)
+                if (vx < 1 || vx >= VoxelData.ChunkSize - 1) break;
+                if (vz < 1 || vz >= VoxelData.ChunkSize - 1) break;
+                if (vy < 1 || vy >= VoxelData.ChunkHeight - 1) break;
+
+                if (blocks[vx, vy, vz] == BlockType.Stone)
+                    blocks[vx, vy, vz] = oreType;
+
+                int dir = rng.Next(0, 12);
+                switch (dir)
                 {
-                    if (blocks[vx, vy, vz] == BlockType.Stone)
-                        blocks[vx, vy, vz] = type;
+                    case 0: vx++; break;
+                    case 1: vx--; break;
+                    case 2: vz++; break;
+                    case 3: vz--; break;
+                    case 4: vy++; break;
+                    case 5: vy--; break;
+                    case 6: vx++; vz++; break;
+                    case 7: vx--; vz--; break;
+                    case 8: vx++; vz--; break;
+                    case 9: vx--; vz++; break;
+                    case 10: vy++; vx += (rng.Next(0, 2) == 0 ? -1 : 1); break;
+                    case 11: vy--; vz += (rng.Next(0, 2) == 0 ? -1 : 1); break;
                 }
-                int d = rng.Next(6);
-                if (d == 0) vx++; else if (d == 1) vx--; else if (d == 2) vz++; else if (d == 3) vz--; else if (d == 4) vy++; else vy--;
             }
         }
     }
 
-    private void GenerateTrees()
+    private void GenerateTreesBiomePatches()
     {
-        // Random check to ensure trees are spaced out
-        // Use a simple Poisson-disk-like check by hashing
-        
-        for (int x = 2; x < VoxelData.ChunkSize - 2; x++)
-        for (int z = 2; z < VoxelData.ChunkSize - 2; z++)
+        for (int x = TreeEdgePadding; x < VoxelData.ChunkSize - TreeEdgePadding; x++)
         {
-            int wx = coord.x * VoxelData.ChunkSize + x;
-            int wz = coord.y * VoxelData.ChunkSize + z;
-
-            VoxelWorld.BiomeType biome = world.GetBiome(wx, wz);
-            
-            // Tree probability based on biome
-            float chance = 0f;
-            if (biome == VoxelWorld.BiomeType.Forest) chance = 0.025f; // reduced from high value
-            else if (biome == VoxelWorld.BiomeType.Plains) chance = 0.002f; // very rare
-            else continue; // No trees in Desert, Ocean, etc.
-
-            if ((world.Hash3(wx, 100, wz) % 1000) / 1000f > chance) continue;
-
-            int sy = world.GetLandHeight(wx, wz);
-            
-            // Check limits
-            if (sy <= VoxelWorld.SeaLevel + 1 || sy >= VoxelData.ChunkHeight - 10) continue;
-            if (blocks[x, sy, z] != BlockType.Grass) continue;
-
-            // Simple check to prevent overlapping trunks in the same chunk
-            bool spaceClear = true;
-            for(int nx = x-2; nx <= x+2; nx++)
-            for(int nz = z-2; nz <= z+2; nz++)
+            for (int z = TreeEdgePadding; z < VoxelData.ChunkSize - TreeEdgePadding; z++)
             {
-                if (nx==x && nz==z) continue;
-                if (blocks[nx, sy+1, nz] == BlockType.Log) spaceClear = false;
-            }
-            if (!spaceClear) continue;
+                int wx = coord.x * VoxelData.ChunkSize + x;
+                int wz = coord.y * VoxelData.ChunkSize + z;
 
-            // Generate Tree
-            int h = 4 + (world.Hash3(wx, sy + 1, wz) % 3);
-            for (int y = 1; y <= h; y++) blocks[x, sy + y, z] = BlockType.Log;
-            for (int lx = -2; lx <= 2; lx++)
-            for (int lz = -2; lz <= 2; lz++)
-            for (int ly = h - 2; ly <= h + 1; ly++)
-            {
-                if (Mathf.Abs(lx) == 2 && Mathf.Abs(lz) == 2 && ly >= h) continue;
-                if (ly > h && (Mathf.Abs(lx) == 2 || Mathf.Abs(lz) == 2)) continue;
-                
-                int ax = x + lx;
-                int az = z + lz;
-                int ay = sy + ly;
-                if (ax >= 0 && ax < VoxelData.ChunkSize && az >= 0 && az < VoxelData.ChunkSize && ay < VoxelData.ChunkHeight)
-                {
-                    if (blocks[ax, ay, az] == BlockType.Air) blocks[ax, ay, az] = BlockType.Leaves;
-                }
+                world.GetBiomeParams(wx, wz, out float temp, out float rain, out float forest, out float ocean);
+
+                if (ocean < world.oceanThreshold) continue;
+
+                int surfaceY = world.GetLandHeight(wx, wz);
+                if (surfaceY <= VoxelWorld.SeaLevel + 1) continue;
+                if (surfaceY < 1 || surfaceY >= VoxelData.ChunkHeight - 10) continue;
+                if (blocks[x, surfaceY, z] != BlockType.Grass) continue;
+
+                bool isForest = forest > 0.58f;
+
+                float humidityFactor = Mathf.Lerp(0.55f, 1.0f, rain);
+                float chance = isForest ? (0.030f * humidityFactor) : (0.006f * humidityFactor);
+
+                int h = world.Hash3(wx, surfaceY, wz);
+                float r01 = (Mathf.Abs(h) % 10000) / 10000f;
+                if (r01 > chance) continue;
+
+                float bigChance = isForest ? 0.10f : 0.03f;
+                float r02 = (Mathf.Abs(world.Hash3(wx + 17, surfaceY + 3, wz - 9)) % 10000) / 10000f;
+                bool big = r02 < bigChance;
+
+                if (big)
+                    TryPlaceBigOak(x, surfaceY, z, wx, wz);
+                else
+                    TryPlaceSmallOak(x, surfaceY, z, wx, wz);
             }
+        }
+    }
+
+    private bool TryPlaceSmallOak(int x, int surfaceY, int z, int wx, int wz)
+    {
+        int trunkH = 4 + (Mathf.Abs(world.Hash3(wx, surfaceY, wz)) % 3);
+
+        int trunkBelowLeaves = 2 + (Mathf.Abs(world.Hash3(wx + 5, surfaceY, wz + 5)) % 2);
+        int leafBaseY = surfaceY + trunkBelowLeaves;
+        int topY = surfaceY + trunkH;
+
+        if (topY + 3 >= VoxelData.ChunkHeight) return false;
+
+        for (int y = surfaceY + 1; y <= topY; y++)
+            if (blocks[x, y, z] != BlockType.Air) return false;
+
+        for (int y = surfaceY + 1; y <= topY; y++)
+            blocks[x, y, z] = BlockType.Log;
+
+        PlaceLeavesSquare(x, z, leafBaseY + 1, 2, false);
+        PlaceLeavesSquare(x, z, leafBaseY + 2, 2, true);
+        PlaceLeavesSquare(x, z, leafBaseY + 3, 1, true);
+        PlaceLeavesCross(x, z, leafBaseY + 4);
+
+        return true;
+    }
+
+    private bool TryPlaceBigOak(int x, int surfaceY, int z, int wx, int wz)
+    {
+        int trunkH = 8 + (Mathf.Abs(world.Hash3(wx, surfaceY, wz)) % 5);
+        int trunkBelowLeaves = 3;
+        int leafBaseY = surfaceY + trunkBelowLeaves;
+        int topY = surfaceY + trunkH;
+
+        if (topY + 4 >= VoxelData.ChunkHeight) return false;
+
+        for (int y = surfaceY + 1; y <= topY; y++)
+            if (blocks[x, y, z] != BlockType.Air) return false;
+
+        for (int y = surfaceY + 1; y <= topY; y++)
+            blocks[x, y, z] = BlockType.Log;
+
+        PlaceLeavesSquare(x, z, leafBaseY + 1, 3, false);
+        PlaceLeavesSquare(x, z, leafBaseY + 2, 3, true);
+        PlaceLeavesSquare(x, z, leafBaseY + 3, 2, true);
+        PlaceLeavesSquare(x, z, leafBaseY + 4, 2, false);
+        PlaceLeavesCross(x, z, leafBaseY + 5);
+
+        int branches = 2 + (Mathf.Abs(world.Hash3(wx + 31, surfaceY, wz - 7)) % 2);
+        for (int i = 0; i < branches; i++)
+        {
+            int dir = (Mathf.Abs(world.Hash3(wx + i * 19, surfaceY + i, wz + i * 13)) % 4);
+            int dx = (dir == 0) ? 1 : (dir == 1) ? -1 : 0;
+            int dz = (dir == 2) ? 1 : (dir == 3) ? -1 : 0;
+
+            int by = leafBaseY + 2 + i;
+            int len = 2 + (Mathf.Abs(world.Hash3(wx + 77, by, wz + 77)) % 2);
+
+            int ax = x, az = z;
+            for (int s = 0; s < len; s++)
+            {
+                ax += dx; az += dz;
+                if (ax < 1 || ax >= VoxelData.ChunkSize - 1) break;
+                if (az < 1 || az >= VoxelData.ChunkSize - 1) break;
+                if (by < 1 || by >= VoxelData.ChunkHeight - 1) break;
+
+                if (blocks[ax, by, az] == BlockType.Air)
+                    blocks[ax, by, az] = BlockType.Log;
+
+                PlaceLeavesSquare(ax, az, by + 1, 1, true);
+                PlaceLeavesCross(ax, az, by + 2);
+            }
+        }
+
+        return true;
+    }
+
+    private void PlaceLeavesSquare(int cx, int cz, int y, int r, bool allowCorners)
+    {
+        if (y < 0 || y >= VoxelData.ChunkHeight) return;
+
+        for (int dx = -r; dx <= r; dx++)
+        for (int dz = -r; dz <= r; dz++)
+        {
+            if (!allowCorners && Mathf.Abs(dx) == r && Mathf.Abs(dz) == r) continue;
+
+            int ax = cx + dx;
+            int az = cz + dz;
+            if (ax < 0 || ax >= VoxelData.ChunkSize) continue;
+            if (az < 0 || az >= VoxelData.ChunkSize) continue;
+
+            if (blocks[ax, y, az] == BlockType.Air)
+                blocks[ax, y, az] = BlockType.Leaves;
+        }
+    }
+
+    private void PlaceLeavesCross(int cx, int cz, int y)
+    {
+        if (y < 0 || y >= VoxelData.ChunkHeight) return;
+
+        int[,] pts = new int[,]
+        {
+            {0,0},{1,0},{-1,0},{0,1},{0,-1}
+        };
+
+        for (int i = 0; i < pts.GetLength(0); i++)
+        {
+            int ax = cx + pts[i, 0];
+            int az = cz + pts[i, 1];
+            if (ax < 0 || ax >= VoxelData.ChunkSize) continue;
+            if (az < 0 || az >= VoxelData.ChunkSize) continue;
+
+            if (blocks[ax, y, az] == BlockType.Air)
+                blocks[ax, y, az] = BlockType.Leaves;
         }
     }
 
     public void Rebuild()
     {
-        List<Vector3> verts = new List<Vector3>();
-        List<Vector2> uvs = new List<Vector2>();
-        List<Color> cols = new List<Color>();
+        List<Vector3> verts = new List<Vector3>(8192);
+        List<Vector2> uvs = new List<Vector2>(8192);
+        List<Color> cols = new List<Color>(8192);
+
         List<int>[] tris = new List<int>[SubmeshCount];
-        for (int i = 0; i < SubmeshCount; i++) tris[i] = new List<int>();
-        List<Vector3> cVerts = new List<Vector3>();
-        List<int> cTris = new List<int>();
-        int vIdx = 0;
-        int cVIdx = 0;
+        for (int i = 0; i < SubmeshCount; i++) tris[i] = new List<int>(8192);
+
+        List<Vector3> cVerts = new List<Vector3>(8192);
+        List<int> cTris = new List<int>(8192);
+
+        int vertIndex = 0;
+        int cVertIndex = 0;
 
         for (int x = 0; x < VoxelData.ChunkSize; x++)
         for (int y = 0; y < VoxelData.ChunkHeight; y++)
@@ -200,64 +404,71 @@ public class Chunk : MonoBehaviour
         {
             BlockType bt = blocks[x, y, z];
             if (bt == BlockType.Air) continue;
+
             int wx = coord.x * VoxelData.ChunkSize + x;
             int wz = coord.y * VoxelData.ChunkSize + z;
+
             world.GetBiomeTintsAt(wx, wz, out Color grassTint, out Color foliageTint);
 
-            for (int f = 0; f < 6; f++)
+            Vector3Int local = new Vector3Int(x, y, z);
+
+            for (int face = 0; face < 6; face++)
             {
-                Vector3Int n = new Vector3Int(x, y, z) + Vector3Int.RoundToInt(VoxelData.FaceChecks[f]);
-                BlockType nb = BlockType.Air;
-                if (n.x >= 0 && n.x < VoxelData.ChunkSize && n.z >= 0 && n.z < VoxelData.ChunkSize && n.y >= 0 && n.y < VoxelData.ChunkHeight)
-                    nb = blocks[n.x, n.y, n.z];
-                else
-                    nb = world.GetBlock(LocalToWorld(n));
+                Vector3Int neighbor = local + Vector3Int.RoundToInt(VoxelData.FaceChecks[face]);
+                BlockType nb = GetNeighborBlock(neighbor);
 
-                bool render = false;
-                if (bt == BlockType.Water) render = (nb == BlockType.Air);
-                else render = (nb == BlockType.Air || nb == BlockType.Water);
-
-                if (render)
+                if (bt == BlockType.Water)
                 {
-                    int sub = 3;
-                    if (bt == BlockType.Grass) { if (f==2) sub=0; else if (f==3) sub=2; else sub=1; }
-                    else if (bt == BlockType.Dirt) sub=2;
-                    else if (bt == BlockType.Sand) sub=4;
-                    else if (bt == BlockType.Water) sub=5;
-                    else if (bt == BlockType.Log) { if (f==2 || f==3) sub=6; else sub=7; }
-                    else if (bt == BlockType.Leaves) sub=8;
-                    else if (bt == BlockType.Bedrock) sub=9;
-                    else if (bt == BlockType.CoalOre) sub=10;
-                    else if (bt == BlockType.IronOre) sub=11;
-                    else if (bt == BlockType.RedstoneOre) sub=12;
-                    else if (bt == BlockType.LapisOre) sub=13;
-                    else if (bt == BlockType.DiamondOre) sub=14;
-                    else if (bt == BlockType.EmeraldOre) sub=15;
-                    else if (bt == BlockType.GoldOre) sub=16;
-
-                    Color c = Color.white;
-                    if (sub == 0 || sub == 1) c = grassTint;
-                    if (sub == 8) c = foliageTint;
-
-                    for (int i = 0; i < 4; i++)
-                    {
-                        verts.Add(new Vector3(x,y,z) + VoxelData.Verts[VoxelData.Tris[f, i]]);
-                        uvs.Add(VoxelData.BaseUVs[i]);
-                        cols.Add(c);
-                    }
-                    tris[sub].Add(vIdx); tris[sub].Add(vIdx+1); tris[sub].Add(vIdx+2);
-                    tris[sub].Add(vIdx); tris[sub].Add(vIdx+2); tris[sub].Add(vIdx+3);
-                    vIdx += 4;
-
-                    if (bt != BlockType.Water)
-                    {
-                        cVerts.Add(verts[verts.Count-4]); cVerts.Add(verts[verts.Count-3]);
-                        cVerts.Add(verts[verts.Count-2]); cVerts.Add(verts[verts.Count-1]);
-                        cTris.Add(cVIdx); cTris.Add(cVIdx+1); cTris.Add(cVIdx+2);
-                        cTris.Add(cVIdx); cTris.Add(cVIdx+2); cTris.Add(cVIdx+3);
-                        cVIdx += 4;
-                    }
+                    if (nb != BlockType.Air) continue;
                 }
+                else
+                {
+                    if (nb != BlockType.Air && nb != BlockType.Water) continue;
+                }
+
+                int sub = PickSubmesh(bt, face);
+
+                Color vc = Color.white;
+                if (sub == SM_GrassTop || sub == SM_GrassSide) vc = grassTint;
+                else if (sub == SM_Leaves) vc = foliageTint;
+
+                for (int i = 0; i < 4; i++)
+                {
+                    int v = VoxelData.Tris[face, i];
+                    Vector3 vv = VoxelData.Verts[v];
+
+                    if (bt == BlockType.Water && vv.y > 0.5f)
+                        vv.y = VoxelData.WaterVisualHeight;
+
+                    verts.Add(new Vector3(x, y, z) + vv);
+                    uvs.Add(VoxelData.BaseUVs[i]);
+                    cols.Add(vc);
+                }
+
+                tris[sub].Add(vertIndex + 0);
+                tris[sub].Add(vertIndex + 1);
+                tris[sub].Add(vertIndex + 2);
+                tris[sub].Add(vertIndex + 0);
+                tris[sub].Add(vertIndex + 2);
+                tris[sub].Add(vertIndex + 3);
+
+                if (bt != BlockType.Water)
+                {
+                    int baseI = cVertIndex;
+                    cVerts.Add(verts[verts.Count - 4]);
+                    cVerts.Add(verts[verts.Count - 3]);
+                    cVerts.Add(verts[verts.Count - 2]);
+                    cVerts.Add(verts[verts.Count - 1]);
+                    cTris.Add(baseI + 0);
+                    cTris.Add(baseI + 1);
+                    cTris.Add(baseI + 2);
+                    cTris.Add(baseI + 0);
+                    cTris.Add(baseI + 2);
+                    cTris.Add(baseI + 3);
+                    cVertIndex += 4;
+                }
+
+                vertIndex += 4;
             }
         }
 
@@ -269,6 +480,7 @@ public class Chunk : MonoBehaviour
         m.subMeshCount = SubmeshCount;
         for (int i = 0; i < SubmeshCount; i++) m.SetTriangles(tris[i], i);
         m.RecalculateNormals();
+        m.RecalculateBounds();
         meshFilter.sharedMesh = m;
 
         Mesh cm = new Mesh();
@@ -276,6 +488,56 @@ public class Chunk : MonoBehaviour
         cm.SetVertices(cVerts);
         cm.SetTriangles(cTris, 0);
         cm.RecalculateNormals();
+        cm.RecalculateBounds();
+        meshCollider.sharedMesh = null;
         meshCollider.sharedMesh = cm;
+    }
+
+    private int PickSubmesh(BlockType bt, int face)
+    {
+        switch (bt)
+        {
+            case BlockType.Water: return SM_Water;
+            case BlockType.Sand: return SM_Sand;
+            case BlockType.Stone: return SM_Stone;
+            case BlockType.Bedrock: return SM_Bedrock;
+
+            case BlockType.CoalOre: return SM_Coal;
+            case BlockType.IronOre: return SM_Iron;
+            case BlockType.GoldOre: return SM_Gold;
+            case BlockType.RedstoneOre: return SM_Redstone;
+            case BlockType.LapisOre: return SM_Lapis;
+            case BlockType.DiamondOre: return SM_Diamond;
+            case BlockType.EmeraldOre: return SM_Emerald;
+
+            case BlockType.Leaves: return SM_Leaves;
+            case BlockType.Dirt: return SM_Dirt;
+
+            case BlockType.Grass:
+                if (face == 2) return SM_GrassTop;
+                if (face == 3) return SM_Dirt;
+                return SM_GrassSide;
+
+            case BlockType.Log:
+                if (face == 2 || face == 3) return SM_LogTop;
+                return SM_LogSide;
+
+            default:
+                return SM_Stone;
+        }
+    }
+
+    private BlockType GetNeighborBlock(Vector3Int local)
+    {
+        if (local.y < 0 || local.y >= VoxelData.ChunkHeight) return BlockType.Air;
+
+        if (local.x >= 0 && local.x < VoxelData.ChunkSize &&
+            local.z >= 0 && local.z < VoxelData.ChunkSize)
+        {
+            return blocks[local.x, local.y, local.z];
+        }
+
+        Vector3Int wp = LocalToWorld(local);
+        return world.GetBlock(wp);
     }
 }

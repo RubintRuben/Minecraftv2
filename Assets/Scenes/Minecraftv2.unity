@@ -770,6 +770,7 @@ MonoBehaviour:
     bedrock: {fileID: 2100000, guid: 5bd4227b180611f4eb65e5170a4a17cc, type: 2}
     coalOre: {fileID: 2100000, guid: dcf98d6f0e52e2e44a617fb4d10f2eac, type: 2}
     ironOre: {fileID: 2100000, guid: bf3de63b7bd57484fb56df9afd7a185b, type: 2}
+    goldOre: {fileID: 2100000, guid: 009d961d2230dbe4586861db8dc0e228, type: 2}
     redstoneOre: {fileID: 2100000, guid: 8ba06e30d5d9d144fa815d74c0537f84, type: 2}
     lapisOre: {fileID: 2100000, guid: fe1ce3472e3efee47ad947615a62f5e9, type: 2}
     diamondOre: {fileID: 2100000, guid: 2633a1aa2311ebf4387dc55c796e2e96, type: 2}
@@ -779,8 +780,8 @@ MonoBehaviour:
     plainsFoliage: {r: 0.46666667, g: 0.67058825, b: 0.18431373, a: 1}
   settings:
     player: {fileID: 709717491}
-    viewDistanceInChunks: 3
-    seed: 1
+    viewDistanceInChunks: 6
+    seed: 12345
   terrainColliderMaterial: {fileID: 13400000, guid: 6cf2eebc656adab4dbe11164c61a6dba, type: 2}
   roughness: 0.25
   minecraftLikeWater: 1

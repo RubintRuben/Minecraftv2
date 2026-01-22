@@ -10,7 +10,6 @@ public class FallingSandEntity : MonoBehaviour
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
-        rb.constraints = RigidbodyConstraints.FreezeRotation;
     }
 
     void FixedUpdate()

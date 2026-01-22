@@ -10,11 +10,6 @@ public class VoxelWorld : MonoBehaviour
     {
         public Color plainsGrass = new Color32(0x91, 0xBD, 0x59, 0xFF);
         public Color plainsFoliage = new Color32(0x77, 0xAB, 0x2F, 0xFF);
-        public Color forestGrass = new Color32(0x79, 0xC0, 0x5A, 0xFF);
-        public Color forestFoliage = new Color32(0x59, 0xAE, 0x30, 0xFF);
-        public Color desertGrass = new Color32(0xBF, 0xB7, 0x55, 0xFF);
-        public Color desertFoliage = new Color32(0xAE, 0xA4, 0x2A, 0xFF);
-        public Color mountainGrass = new Color32(0x8A, 0xB6, 0x8D, 0xFF);
     }
 
     [System.Serializable]
@@ -26,10 +21,13 @@ public class VoxelWorld : MonoBehaviour
         public Material stone;
         public Material sand;
         public Material water;
+
         public Material logTop;
         public Material logSide;
         public Material leaves;
+
         public Material bedrock;
+
         public Material coalOre;
         public Material ironOre;
         public Material goldOre;
@@ -43,19 +41,8 @@ public class VoxelWorld : MonoBehaviour
     public class WorldSettings
     {
         public Transform player;
-        public int viewDistanceInChunks = 8;
+        public int viewDistanceInChunks = 6;
         public int seed = 12345;
-    }
-
-    public enum BiomeType
-    {
-        Ocean,
-        Beach,
-        Plains,
-        Forest,
-        Desert,
-        Mountains,
-        Snow
     }
 
     public BlockMaterials materials;
@@ -63,22 +50,48 @@ public class VoxelWorld : MonoBehaviour
     public WorldSettings settings;
     public PhysicsMaterial terrainColliderMaterial;
 
+    [Header("Terrain")]
     [Range(0f, 1f)] public float roughness = 0.25f;
+
+    [Header("Water")]
+    public bool minecraftLikeWater = true;
+    public float oceanScale = 0.0018f;
+    [Range(0f, 1f)] public float oceanThreshold = 0.52f;
+    public int minWaterDepth = 2;
+
+    [Header("Soil")]
+    public int topSoilDepth = 4;
+
+    [Header("Caves (banya)")]
     public bool enableCaves = true;
+    public float caveScale = 0.045f;
+    [Range(0.0f, 1.0f)] public float caveThreshold = 0.78f;
+    public int caveMinDepthBelowSurface = 6;
+
+    [Header("Sand Physics")]
+    public bool sandFalls = true;
+    public int sandChecksPerFrame = 64;
+    public float fallingSandSpawnYOffset = 0.15f;
+    public float fallingSandLinearDrag = 0.05f;
+    public float fallingSandAngularDrag = 0.05f;
+
+    const int ChunkCreateBudgetPerFrame = 2;
+
+    const float BiomeTempScale = 0.0017f;
+    const float BiomeRainScale = 0.0017f;
+    const float BiomeForestScale = 0.0014f;
 
     private readonly Dictionary<Vector2Int, Chunk> chunks = new Dictionary<Vector2Int, Chunk>();
     private readonly HashSet<Vector2Int> activeChunkCoords = new HashSet<Vector2Int>();
     private readonly List<Vector2Int> neededChunks = new List<Vector2Int>(2048);
-    
-    // Sand physics
+
     private readonly Queue<Vector3Int> sandQueue = new Queue<Vector3Int>(4096);
     private readonly HashSet<Vector3Int> sandQueued = new HashSet<Vector3Int>();
 
-    // Water physics
-    private readonly Queue<Vector3Int> waterQueue = new Queue<Vector3Int>(4096);
-    private readonly HashSet<Vector3Int> waterQueued = new HashSet<Vector3Int>();
-
-    const int ChunkCreateBudgetPerFrame = 2;
+    private enum BiomeId
+    {
+        Plains
+    }
 
     private void Awake()
     {
@@ -86,9 +99,22 @@ public class VoxelWorld : MonoBehaviour
         if (biomeTints == null) biomeTints = new BiomeTints();
     }
 
+    public void GetBiomeTintsAt(int worldX, int worldZ, out Color grass, out Color foliage)
+    {
+        BiomeId biome = BiomeId.Plains;
+        switch (biome)
+        {
+            default:
+                grass = biomeTints.plainsGrass;
+                foliage = biomeTints.plainsFoliage;
+                break;
+        }
+    }
+
     private void Start()
     {
         UpdateWorld(true);
+
         if (settings.player != null)
         {
             var pc = settings.player.GetComponent<PlayerController>();
@@ -99,6 +125,7 @@ public class VoxelWorld : MonoBehaviour
                 settings.player.position = new Vector3(0.5f, h + 3f, 0.5f);
             }
         }
+
         UpdateWorld(true);
     }
 
@@ -106,15 +133,17 @@ public class VoxelWorld : MonoBehaviour
     {
         UpdateWorld(false);
         TickSand();
-        TickWater();
     }
 
     private void UpdateWorld(bool force)
     {
         if (settings.player == null) return;
+
         Vector2Int playerChunk = WorldToChunkCoord(settings.player.position);
+
         activeChunkCoords.Clear();
         neededChunks.Clear();
+
         int r = Mathf.Max(1, settings.viewDistanceInChunks);
         for (int dx = -r; dx <= r; dx++)
         {
@@ -125,15 +154,18 @@ public class VoxelWorld : MonoBehaviour
                 if (!chunks.ContainsKey(c)) neededChunks.Add(c);
             }
         }
+
         neededChunks.Sort((a, b) =>
         {
             int da = (a.x - playerChunk.x) * (a.x - playerChunk.x) + (a.y - playerChunk.y) * (a.y - playerChunk.y);
             int db = (b.x - playerChunk.x) * (b.x - playerChunk.x) + (b.y - playerChunk.y) * (b.y - playerChunk.y);
             return da.CompareTo(db);
         });
+
         int budget = force ? neededChunks.Count : ChunkCreateBudgetPerFrame;
         for (int i = 0; i < neededChunks.Count && i < budget; i++)
             CreateChunk(neededChunks[i]);
+
         foreach (var kv in chunks)
         {
             bool shouldBeActive = activeChunkCoords.Contains(kv.Key);
@@ -144,12 +176,16 @@ public class VoxelWorld : MonoBehaviour
     private void CreateChunk(Vector2Int coord)
     {
         if (chunks.ContainsKey(coord)) return;
+
         GameObject go = new GameObject($"Chunk_{coord.x}_{coord.y}");
         go.transform.parent = transform;
         go.transform.position = new Vector3(coord.x * VoxelData.ChunkSize, 0, coord.y * VoxelData.ChunkSize);
+
         Chunk chunk = go.AddComponent<Chunk>();
         chunk.Init(this, coord, materials);
+
         chunks.Add(coord, chunk);
+
         RebuildChunkIfExists(new Vector2Int(coord.x - 1, coord.y));
         RebuildChunkIfExists(new Vector2Int(coord.x + 1, coord.y));
         RebuildChunkIfExists(new Vector2Int(coord.x, coord.y - 1));
@@ -163,172 +199,250 @@ public class VoxelWorld : MonoBehaviour
         return new Vector2Int(cx, cz);
     }
 
-    public BiomeType GetBiome(int worldX, int worldZ)
+    static float N01(float v) => Mathf.Clamp01(v);
+    static float N11(float v01) => v01 * 2f - 1f;
+
+    float Perlin01(float x, float z, int ox, int oz, float scale)
     {
-        float s = settings.seed;
-        float temp = Mathf.PerlinNoise((worldX + s) * 0.001f, (worldZ + s) * 0.001f);
-        float rain = Mathf.PerlinNoise((worldX + s + 500) * 0.001f, (worldZ + s + 500) * 0.001f);
-        
-        // Ocean check via noise (continental)
-        float heightNoise = Mathf.PerlinNoise((worldX + s) * 0.002f, (worldZ + s) * 0.002f);
-        if (heightNoise < 0.35f) return BiomeType.Ocean;
-
-        // Mountain check
-        if (heightNoise > 0.7f)
-        {
-            if (temp < 0.3f) return BiomeType.Snow;
-            return BiomeType.Mountains;
-        }
-
-        if (temp > 0.6f && rain < 0.4f) return BiomeType.Desert;
-        if (rain > 0.5f && temp > 0.3f) return BiomeType.Forest;
-        
-        return BiomeType.Plains;
+        int s = settings.seed;
+        return Mathf.PerlinNoise((x + s * 131 + ox) * scale, (z + s * 197 + oz) * scale);
     }
 
-    public void GetBiomeTintsAt(int worldX, int worldZ, out Color grass, out Color foliage)
+    float FBM01(float x, float z, float scale, int octaves, float lacunarity, float persistence, int ox, int oz)
     {
-        BiomeType b = GetBiome(worldX, worldZ);
-        switch (b)
+        float sum = 0f;
+        float amp = 1f;
+        float freq = 1f;
+        float norm = 0f;
+
+        int o = Mathf.Max(1, octaves);
+        for (int i = 0; i < o; i++)
         {
-            case BiomeType.Forest:
-                grass = biomeTints.forestGrass;
-                foliage = biomeTints.forestFoliage;
-                break;
-            case BiomeType.Desert:
-                grass = biomeTints.desertGrass;
-                foliage = biomeTints.desertFoliage;
-                break;
-            case BiomeType.Mountains:
-                grass = biomeTints.mountainGrass;
-                foliage = biomeTints.mountainGrass; 
-                break;
-            default:
-                grass = biomeTints.plainsGrass;
-                foliage = biomeTints.plainsFoliage;
-                break;
+            float n = Perlin01(x * freq, z * freq, ox + i * 17, oz - i * 23, scale);
+            sum += n * amp;
+            norm += amp;
+            amp *= persistence;
+            freq *= lacunarity;
         }
+
+        if (norm <= 0.00001f) return 0.5f;
+        return sum / norm;
+    }
+
+    float Ridged01(float x, float z, float scale, int octaves, float lacunarity, float persistence, int ox, int oz)
+    {
+        float sum = 0f;
+        float amp = 1f;
+        float freq = 1f;
+        float norm = 0f;
+
+        int o = Mathf.Max(1, octaves);
+        for (int i = 0; i < o; i++)
+        {
+            float n = Perlin01(x * freq, z * freq, ox + i * 29, oz + i * 31, scale);
+            n = 1f - Mathf.Abs(n * 2f - 1f);
+            n *= n;
+            sum += n * amp;
+            norm += amp;
+            amp *= persistence;
+            freq *= lacunarity;
+        }
+
+        if (norm <= 0.00001f) return 0f;
+        return sum / norm;
+    }
+
+    public void GetBiomeParams(int worldX, int worldZ, out float temp, out float rain, out float forest, out float ocean)
+    {
+        int s = settings.seed;
+
+        temp = Mathf.PerlinNoise((worldX + s * 11) * BiomeTempScale, (worldZ + s * 11) * BiomeTempScale);
+        rain = Mathf.PerlinNoise((worldX + s * 23) * BiomeRainScale, (worldZ + s * 23) * BiomeRainScale);
+
+        forest = Mathf.PerlinNoise((worldX + s * 37) * BiomeForestScale, (worldZ + s * 37) * BiomeForestScale);
+
+        ocean = Mathf.PerlinNoise((worldX + s * 101) * oceanScale, (worldZ + s * 101) * oceanScale);
+    }
+
+    float OceanMask01(int worldX, int worldZ)
+    {
+        GetBiomeParams(worldX, worldZ, out _, out _, out _, out float ocean01);
+        return N01(Mathf.InverseLerp(oceanThreshold, 0.0f, ocean01));
     }
 
     public int GetLandHeight(int worldX, int worldZ)
     {
-        float s = settings.seed;
-        
-        // Base terrain noise
-        float continental = Mathf.PerlinNoise((worldX + s) * 0.002f, (worldZ + s) * 0.002f);
-        
-        float baseH = SeaLevel;
-        float multiplier = 10f;
+        float r = Mathf.Lerp(0.85f, 1.25f, roughness);
 
-        if (continental < 0.35f) // Ocean
+        float baseN = FBM01(worldX, worldZ, 0.00105f * r, 4, 2.0f, 0.5f, 17001, -9001);
+        float hillN = FBM01(worldX, worldZ, 0.00225f * r, 4, 2.0f, 0.52f, -31001, 12001);
+        float selN = FBM01(worldX, worldZ, 0.00072f * r, 2, 2.0f, 0.5f, 9001, 7001);
+
+        float blended = Mathf.Lerp(baseN, hillN, Mathf.SmoothStep(0.0f, 1.0f, selN));
+        float hills = N11(blended);
+
+        float ridge = Ridged01(worldX, worldZ, 0.00115f * r, 3, 2.0f, 0.55f, 33001, -17001);
+        float mountains = Mathf.Pow(ridge, 2.25f);
+
+        float oceanMask = OceanMask01(worldX, worldZ);
+
+        float h = SeaLevel + 10f + hills * 18f + mountains * 42f;
+
+        if (oceanMask > 0.001f)
         {
-            baseH = 45f;
-            multiplier = 10f;
-        }
-        else if (continental > 0.7f) // Mountains
-        {
-            baseH = 90f;
-            multiplier = 40f;
-        }
-        else // Plains/Forest/Desert
-        {
-            baseH = 68f;
-            multiplier = 15f;
+            float oceanFloor = SeaLevel - 10f + N11(FBM01(worldX, worldZ, 0.0028f * r, 2, 2.0f, 0.5f, 41001, 21001)) * 3.5f;
+            h = Mathf.Lerp(h, oceanFloor, Mathf.Clamp01(oceanMask));
         }
 
-        // Add detail noise
-        float detail = Mathf.PerlinNoise((worldX + s) * 0.02f, (worldZ + s) * 0.02f) * 2f - 1f;
-        
-        // River carving
-        float riverNoise = Mathf.PerlinNoise((worldX + s + 9999) * 0.0008f, (worldZ + s + 9999) * 0.0008f);
-        float riverVal = Mathf.Abs(riverNoise * 2f - 1f);
-        
-        float finalH = baseH + detail * multiplier * 0.5f;
+        int height = Mathf.RoundToInt(h);
+        height = Mathf.Clamp(height, 2, VoxelData.ChunkHeight - 2);
 
-        if (riverVal < 0.06f && continental > 0.35f) // River
-        {
-            float depth = Mathf.InverseLerp(0.06f, 0.0f, riverVal);
-            finalH = Mathf.Lerp(finalH, SeaLevel - 4, depth);
-        }
+        if (minecraftLikeWater && oceanMask > 0.15f && height < SeaLevel - 1)
+            height = SeaLevel - 1;
 
-        return Mathf.RoundToInt(finalH);
+        return height;
     }
 
-    bool IsCave(int worldX, int worldY, int worldZ)
+    float CaveNoise01(int worldX, int worldY, int worldZ)
+    {
+        int s = settings.seed;
+
+        float sx = (worldX + s * 13) * caveScale;
+        float sy = (worldY + s * 29) * caveScale;
+        float sz = (worldZ + s * 41) * caveScale;
+
+        float a = Mathf.PerlinNoise(sx, sy);
+        float b = Mathf.PerlinNoise(sy, sz);
+        float c = Mathf.PerlinNoise(sx, sz);
+
+        float v = (a * 0.34f + b * 0.33f + c * 0.33f);
+
+        float warp = Mathf.PerlinNoise((worldX + s * 97) * caveScale * 0.55f, (worldZ + s * 101) * caveScale * 0.55f);
+        v = Mathf.Lerp(v, warp, 0.18f);
+
+        return v;
+    }
+
+    bool IsCave(int worldX, int worldY, int worldZ, int surfaceY)
     {
         if (!enableCaves) return false;
         if (worldY <= 4) return false;
 
-        float s = settings.seed;
+        int minTop = Mathf.Max(0, surfaceY - Mathf.Max(1, caveMinDepthBelowSurface));
+        if (worldY >= minTop) return false;
 
-        // 3D Noise for caves (Spaghetti & Cheese)
-        // Cheese noise (large hollows)
-        float cheese = Noise3D((worldX + s) * 0.02f, (worldY + s) * 0.03f, (worldZ + s) * 0.02f);
-        if (cheese > 0.65f) return true;
+        float y01 = Mathf.InverseLerp(0f, SeaLevel + 5f, worldY);
+        float t = Mathf.Lerp(caveThreshold - 0.10f, caveThreshold + 0.05f, y01);
 
-        // Tunnel noise (worm-like)
-        float tunnel1 = Noise3D((worldX + s + 123) * 0.015f, (worldY + s + 456) * 0.015f, (worldZ + s + 789) * 0.015f);
-        if (Mathf.Abs(tunnel1) < 0.12f) return true;
+        float v = CaveNoise01(worldX, worldY, worldZ);
 
+        float rav = Mathf.PerlinNoise((worldX + settings.seed * 211) * caveScale * 0.30f, (worldZ + settings.seed * 223) * caveScale * 0.30f);
+        float band = Mathf.PerlinNoise((worldY + settings.seed * 227) * caveScale * 0.70f, (worldX + settings.seed * 229) * caveScale * 0.10f);
+        float carve = rav * 0.70f + band * 0.30f;
+
+        float extra = Mathf.Lerp(0.0f, 0.09f, carve);
+
+        return v > (t - extra);
+    }
+
+    public void GetOreSettings(out OreSettings o)
+    {
+        o = new OreSettings
+        {
+            coal = new OreLayer(countPerChunk: 20, veinSize: 17, yMin: 0, yMax: 127),
+            iron = new OreLayer(countPerChunk: 20, veinSize: 9, yMin: 0, yMax: 63),
+            gold = new OreLayer(countPerChunk: 4, veinSize: 13, yMin: 0, yMax: 32),
+            redstone = new OreLayer(countPerChunk: 8, veinSize: 7, yMin: 0, yMax: 15),
+            diamond = new OreLayer(countPerChunk: 1, veinSize: 8, yMin: 0, yMax: 15),
+            lapis = new OreLayer(countPerChunk: 1, veinSize: 7, yMin: 0, yMax: 31),
+            emerald = new OreLayer(countPerChunk: 11, veinSize: 1, yMin: 0, yMax: 32)
+        };
+    }
+
+    public struct OreLayer
+    {
+        public int countPerChunk;
+        public int veinSize;
+        public int yMin;
+        public int yMax;
+
+        public OreLayer(int countPerChunk, int veinSize, int yMin, int yMax)
+        {
+            this.countPerChunk = countPerChunk;
+            this.veinSize = veinSize;
+            this.yMin = yMin;
+            this.yMax = yMax;
+        }
+    }
+
+    public struct OreSettings
+    {
+        public OreLayer coal, iron, gold, redstone, lapis, diamond, emerald;
+    }
+
+    bool IsBeach(int surfaceY, float oceanMask)
+    {
+        if (surfaceY <= SeaLevel + 1) return true;
+        if (oceanMask > 0.12f && surfaceY <= SeaLevel + 3) return true;
         return false;
     }
 
-    // Simple 3D Perlin approximation (Unity only has 2D built-in effectively, so we stack 2D)
-    float Noise3D(float x, float y, float z)
+    bool IsLakeHere(int worldX, int worldZ, int surfaceY, float oceanMask)
     {
-        float xy = Mathf.PerlinNoise(x, y);
-        float xz = Mathf.PerlinNoise(x, z);
-        float yz = Mathf.PerlinNoise(y, z);
-        float yx = Mathf.PerlinNoise(y, x);
-        float zx = Mathf.PerlinNoise(z, x);
-        float zy = Mathf.PerlinNoise(z, y);
-        return (xy + xz + yz + yx + zx + zy) / 6f;
+        if (oceanMask > 0.10f) return false;
+        if (surfaceY >= SeaLevel - 1) return false;
+        int h = Hash3(worldX, surfaceY, worldZ);
+        int v = Mathf.Abs(h) % 1000;
+        return v < 6;
     }
 
     public BlockType GetGeneratedBlock(int worldX, int worldY, int worldZ)
     {
         if (worldY < 0 || worldY >= VoxelData.ChunkHeight) return BlockType.Air;
+
         if (worldY <= 4)
         {
-            int h = Hash3(worldX, worldY, worldZ) % 5;
-            if (worldY <= h) return BlockType.Bedrock;
+            int maxY = 1 + (Mathf.Abs(Hash3(worldX, 0, worldZ)) % 5);
+            if (worldY < maxY) return BlockType.Bedrock;
         }
 
+        float oceanMask = OceanMask01(worldX, worldZ);
         int surfaceY = GetLandHeight(worldX, worldZ);
-        BiomeType biome = GetBiome(worldX, worldZ);
 
-        // Water checks
+        bool ocean = minecraftLikeWater && oceanMask > 0.15f;
+        bool lake = minecraftLikeWater && IsLakeHere(worldX, worldZ, surfaceY, oceanMask);
+
         if (worldY > surfaceY)
         {
-            if (worldY <= SeaLevel) return BlockType.Water;
+            if (minecraftLikeWater && worldY <= SeaLevel)
+            {
+                int depth = SeaLevel - surfaceY;
+                if ((ocean && depth >= minWaterDepth) || lake)
+                    return BlockType.Water;
+            }
             return BlockType.Air;
         }
 
-        // Cave checks
-        if (IsCave(worldX, worldY, worldZ))
-        {
-            if (worldY <= SeaLevel) return BlockType.Water; // Flooded caves low down? Or just air. Let's do air above deep.
-            // Actually MC caves below sea level are usually not flooded unless connected to ocean, but for simplicity let's keep them air unless it's ocean
-            if (biome == BiomeType.Ocean && worldY > surfaceY - 5) return BlockType.Water;
-            return BlockType.Air;
-        }
+        int depthBelow = surfaceY - worldY;
 
-        // Surface blocks
         if (worldY == surfaceY)
         {
-            if (surfaceY <= SeaLevel + 2 && (biome == BiomeType.Desert || biome == BiomeType.Beach || biome == BiomeType.Ocean)) return BlockType.Sand;
-            if (biome == BiomeType.Desert) return BlockType.Sand;
-            if (biome == BiomeType.Mountains && surfaceY > 95) return BlockType.Stone; // Snow cap logic could go here
+            if (minecraftLikeWater && surfaceY < SeaLevel) return BlockType.Sand;
+            if (IsBeach(surfaceY, oceanMask)) return BlockType.Sand;
             return BlockType.Grass;
         }
 
-        // Subsurface
-        if (surfaceY > worldY && surfaceY - worldY < 4)
+        int soil = Mathf.Clamp(topSoilDepth, 1, 6);
+
+        if (depthBelow <= soil)
         {
-            if (biome == BiomeType.Desert) return BlockType.Sand;
-            if (surfaceY <= SeaLevel + 2 && (biome == BiomeType.Beach || biome == BiomeType.Ocean)) return BlockType.Sand;
-             return BlockType.Dirt;
+            if (minecraftLikeWater && surfaceY <= SeaLevel + 2 && depthBelow <= 3) return BlockType.Sand;
+            if (oceanMask > 0.12f && surfaceY <= SeaLevel + 4 && depthBelow <= 4) return BlockType.Sand;
+            return BlockType.Dirt;
         }
+
+        if (IsCave(worldX, worldY, worldZ, surfaceY))
+            return BlockType.Air;
 
         return BlockType.Stone;
     }
@@ -336,12 +450,15 @@ public class VoxelWorld : MonoBehaviour
     public BlockType GetBlock(Vector3Int worldPos)
     {
         if (worldPos.y < 0 || worldPos.y >= VoxelData.ChunkHeight) return BlockType.Air;
+
         Vector2Int c = new Vector2Int(
             Mathf.FloorToInt(worldPos.x / (float)VoxelData.ChunkSize),
             Mathf.FloorToInt(worldPos.z / (float)VoxelData.ChunkSize)
         );
+
         if (!chunks.TryGetValue(c, out Chunk chunk))
             return GetGeneratedBlock(worldPos.x, worldPos.y, worldPos.z);
+
         Vector3Int local = chunk.WorldToLocal(worldPos);
         return chunk.GetBlockLocal(local);
     }
@@ -349,41 +466,40 @@ public class VoxelWorld : MonoBehaviour
     public void SetBlock(Vector3Int worldPos, BlockType type)
     {
         if (worldPos.y < 0 || worldPos.y >= VoxelData.ChunkHeight) return;
+
         BlockType prev = GetBlock(worldPos);
+
         Vector2Int c = new Vector2Int(
             Mathf.FloorToInt(worldPos.x / (float)VoxelData.ChunkSize),
             Mathf.FloorToInt(worldPos.z / (float)VoxelData.ChunkSize)
         );
+
         if (!chunks.TryGetValue(c, out Chunk chunk)) return;
+
         Vector3Int local = chunk.WorldToLocal(worldPos);
         chunk.SetBlockLocal(local, type);
         chunk.Rebuild();
-        
+
         if (local.x == 0) RebuildChunkIfExists(new Vector2Int(c.x - 1, c.y));
         if (local.x == VoxelData.ChunkSize - 1) RebuildChunkIfExists(new Vector2Int(c.x + 1, c.y));
         if (local.z == 0) RebuildChunkIfExists(new Vector2Int(c.x, c.y - 1));
         if (local.z == VoxelData.ChunkSize - 1) RebuildChunkIfExists(new Vector2Int(c.x, c.y + 1));
-        
-        if (type == BlockType.Sand) EnqueueSand(worldPos);
-        if (type == BlockType.Water) EnqueueWater(worldPos);
-        
-        if (prev != BlockType.Air && type == BlockType.Air)
+
+        if (sandFalls)
         {
-            Vector3Int above = new Vector3Int(worldPos.x, worldPos.y + 1, worldPos.z);
-            if (GetBlock(above) == BlockType.Sand) EnqueueSand(above);
-            if (GetBlock(above) == BlockType.Water) EnqueueWater(above);
-            
-            // Trigger neighbor water updates
-            EnqueueWater(new Vector3Int(worldPos.x + 1, worldPos.y, worldPos.z));
-            EnqueueWater(new Vector3Int(worldPos.x - 1, worldPos.y, worldPos.z));
-            EnqueueWater(new Vector3Int(worldPos.x, worldPos.y, worldPos.z + 1));
-            EnqueueWater(new Vector3Int(worldPos.x, worldPos.y, worldPos.z - 1));
+            if (type == BlockType.Sand) EnqueueSand(worldPos);
+            if (prev != BlockType.Air && type == BlockType.Air)
+            {
+                Vector3Int above = new Vector3Int(worldPos.x, worldPos.y + 1, worldPos.z);
+                if (GetBlock(above) == BlockType.Sand) EnqueueSand(above);
+            }
         }
     }
 
     private void RebuildChunkIfExists(Vector2Int coord)
     {
-        if (chunks.TryGetValue(coord, out Chunk ch)) ch.Rebuild();
+        if (chunks.TryGetValue(coord, out Chunk ch))
+            ch.Rebuild();
     }
 
     private void EnqueueSand(Vector3Int pos)
@@ -391,99 +507,74 @@ public class VoxelWorld : MonoBehaviour
         if (!sandQueued.Add(pos)) return;
         sandQueue.Enqueue(pos);
     }
-    
-    private void EnqueueWater(Vector3Int pos)
-    {
-        if (!waterQueued.Add(pos)) return;
-        waterQueue.Enqueue(pos);
-    }
 
     private void TickSand()
     {
-        int n = 32;
+        if (!sandFalls) return;
+
+        int n = Mathf.Max(1, sandChecksPerFrame);
         for (int i = 0; i < n; i++)
         {
             if (sandQueue.Count == 0) break;
+
             Vector3Int p = sandQueue.Dequeue();
             sandQueued.Remove(p);
+
             if (GetBlock(p) != BlockType.Sand) continue;
+
             Vector3Int below = new Vector3Int(p.x, p.y - 1, p.z);
             if (below.y < 0) continue;
+
             BlockType b = GetBlock(below);
             if (b != BlockType.Air && b != BlockType.Water) continue;
+
             SpawnFallingSandEntity(p);
             SetBlock(p, BlockType.Air);
-        }
-    }
-
-    private void TickWater()
-    {
-        int n = 32; // Limit water updates per frame to avoid lag
-        for (int i = 0; i < n; i++)
-        {
-            if (waterQueue.Count == 0) break;
-            Vector3Int p = waterQueue.Dequeue();
-            waterQueued.Remove(p);
-
-            BlockType self = GetBlock(p);
-            if (self != BlockType.Water) continue;
-
-            // Try flow down
-            Vector3Int below = new Vector3Int(p.x, p.y - 1, p.z);
-            if (below.y >= 0)
-            {
-                BlockType bBelow = GetBlock(below);
-                if (bBelow == BlockType.Air)
-                {
-                    SetBlock(below, BlockType.Water); // Flow down
-                    continue; 
-                }
-                else if (bBelow != BlockType.Water)
-                {
-                    // Hit ground, try spread
-                    TrySpreadWater(p, new Vector3Int(p.x + 1, p.y, p.z));
-                    TrySpreadWater(p, new Vector3Int(p.x - 1, p.y, p.z));
-                    TrySpreadWater(p, new Vector3Int(p.x, p.y, p.z + 1));
-                    TrySpreadWater(p, new Vector3Int(p.x, p.y, p.z - 1));
-                }
-            }
-        }
-    }
-
-    private void TrySpreadWater(Vector3Int source, Vector3Int target)
-    {
-        if (GetBlock(target) == BlockType.Air)
-        {
-             SetBlock(target, BlockType.Water);
         }
     }
 
     private void SpawnFallingSandEntity(Vector3Int p)
     {
         GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        go.transform.position = new Vector3(p.x + 0.5f, p.y + 0.5f, p.z + 0.5f);
+        go.name = "FallingSand";
+        go.transform.position = new Vector3(p.x + 0.5f, p.y + 0.5f + fallingSandSpawnYOffset, p.z + 0.5f);
+
         var mr = go.GetComponent<MeshRenderer>();
         if (mr != null && materials != null && materials.sand != null) mr.sharedMaterial = materials.sand;
+
         var rb = go.AddComponent<Rigidbody>();
         rb.interpolation = RigidbodyInterpolation.Interpolate;
         rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-        rb.constraints = RigidbodyConstraints.FreezeRotation | RigidbodyConstraints.FreezePositionX | RigidbodyConstraints.FreezePositionZ;
+        rb.linearDamping = fallingSandLinearDrag;
+        rb.angularDamping = fallingSandAngularDrag;
+
         var fs = go.AddComponent<FallingSandEntity>();
         fs.world = this;
     }
 
-    public int Hash3(int x, int y, int z)
+    private int Hash(int x, int z, int seed)
     {
         unchecked
         {
-            int h = settings.seed;
+            int h = seed;
             h = (h * 397) ^ x;
             h = (h * 397) ^ z;
-            h = (h * 397) ^ y;
             h ^= (h << 13);
             h ^= (h >> 17);
             h ^= (h << 5);
             return h;
         }
+    }
+
+    public int Hash3(int x, int y, int z)
+    {
+        return Hash(x, z, Hash(y, x, settings.seed));
+    }
+
+    public bool RandomChance(int worldX, int worldY, int worldZ, int mod, int lessThan)
+    {
+        int h = Hash3(worldX * 92837111, worldY * 689287499, worldZ * 283923481);
+        int v = Mathf.Abs(h) % mod;
+        return v < lessThan;
     }
 }
