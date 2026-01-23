@@ -30,11 +30,12 @@ public class VoxelWorld : MonoBehaviour
 
         public Material coalOre;
         public Material ironOre;
-        public Material goldOre;
         public Material redstoneOre;
         public Material lapisOre;
         public Material diamondOre;
         public Material emeraldOre;
+
+        public Material goldOre;
     }
 
     [System.Serializable]
@@ -59,14 +60,35 @@ public class VoxelWorld : MonoBehaviour
     [Range(0f, 1f)] public float oceanThreshold = 0.52f;
     public int minWaterDepth = 2;
 
+    [Header("Rivers")]
+    public bool enableRivers = true;
+    [Tooltip("Lower = longer, smoother rivers")]
+    public float riverScale = 0.00125f;
+    [Tooltip("River half-width in noise-space (smaller = thinner rivers)")]
+    [Range(0.002f, 0.08f)] public float riverWidth = 0.020f;
+    [Tooltip("How deep the river carves into terrain")]
+    [Range(1f, 30f)] public float riverDepth = 11f;
+    [Tooltip("Extra flattening around river banks")]
+    [Range(0f, 1f)] public float riverBankBlend = 0.55f;
+    [Tooltip("Rivers avoid strong oceans when this is > 0")]
+    [Range(0f, 1f)] public float riverOceanAvoid = 0.55f;
+
     [Header("Soil")]
     public int topSoilDepth = 4;
 
     [Header("Caves (banya)")]
     public bool enableCaves = true;
     public float caveScale = 0.045f;
-    [Range(0.0f, 1.0f)] public float caveThreshold = 0.78f;
+    [Range(0.0f, 1f)] public float caveThreshold = 0.78f;
     public int caveMinDepthBelowSurface = 6;
+
+    [Header("Caves (better)")]
+    [Tooltip("Spaghetti caves: lower = longer tunnels")]
+    public float caveSpaghettiScale = 0.020f;
+    [Range(0.0f, 1f)] public float caveSpaghettiThreshold = 0.62f;
+    [Tooltip("Big caverns: lower = bigger blobs")]
+    public float caveCavernScale = 0.010f;
+    [Range(0.0f, 1f)] public float caveCavernThreshold = 0.74f;
 
     [Header("Sand Physics")]
     public bool sandFalls = true;
@@ -199,59 +221,6 @@ public class VoxelWorld : MonoBehaviour
         return new Vector2Int(cx, cz);
     }
 
-    static float N01(float v) => Mathf.Clamp01(v);
-    static float N11(float v01) => v01 * 2f - 1f;
-
-    float Perlin01(float x, float z, int ox, int oz, float scale)
-    {
-        int s = settings.seed;
-        return Mathf.PerlinNoise((x + s * 131 + ox) * scale, (z + s * 197 + oz) * scale);
-    }
-
-    float FBM01(float x, float z, float scale, int octaves, float lacunarity, float persistence, int ox, int oz)
-    {
-        float sum = 0f;
-        float amp = 1f;
-        float freq = 1f;
-        float norm = 0f;
-
-        int o = Mathf.Max(1, octaves);
-        for (int i = 0; i < o; i++)
-        {
-            float n = Perlin01(x * freq, z * freq, ox + i * 17, oz - i * 23, scale);
-            sum += n * amp;
-            norm += amp;
-            amp *= persistence;
-            freq *= lacunarity;
-        }
-
-        if (norm <= 0.00001f) return 0.5f;
-        return sum / norm;
-    }
-
-    float Ridged01(float x, float z, float scale, int octaves, float lacunarity, float persistence, int ox, int oz)
-    {
-        float sum = 0f;
-        float amp = 1f;
-        float freq = 1f;
-        float norm = 0f;
-
-        int o = Mathf.Max(1, octaves);
-        for (int i = 0; i < o; i++)
-        {
-            float n = Perlin01(x * freq, z * freq, ox + i * 29, oz + i * 31, scale);
-            n = 1f - Mathf.Abs(n * 2f - 1f);
-            n *= n;
-            sum += n * amp;
-            norm += amp;
-            amp *= persistence;
-            freq *= lacunarity;
-        }
-
-        if (norm <= 0.00001f) return 0f;
-        return sum / norm;
-    }
-
     public void GetBiomeParams(int worldX, int worldZ, out float temp, out float rain, out float forest, out float ocean)
     {
         int s = settings.seed;
@@ -264,86 +233,158 @@ public class VoxelWorld : MonoBehaviour
         ocean = Mathf.PerlinNoise((worldX + s * 101) * oceanScale, (worldZ + s * 101) * oceanScale);
     }
 
-    float OceanMask01(int worldX, int worldZ)
+    // =========================
+    // Terrain generation
+    // =========================
+
+    float RiverDistance01(int worldX, int worldZ)
     {
-        GetBiomeParams(worldX, worldZ, out _, out _, out _, out float ocean01);
-        return N01(Mathf.InverseLerp(oceanThreshold, 0.0f, ocean01));
+        // 0 = center line, 1 = far away
+        int s = settings.seed;
+
+        // Cheap domain warp to avoid repetitive parallel bands
+        float wx = worldX + (Mathf.PerlinNoise((worldX + s * 311) * 0.0025f, (worldZ + s * 733) * 0.0025f) - 0.5f) * 220f;
+        float wz = worldZ + (Mathf.PerlinNoise((worldX + s * 911) * 0.0025f, (worldZ + s * 199) * 0.0025f) - 0.5f) * 220f;
+
+        float n = Mathf.PerlinNoise((wx + s * 61) * riverScale, (wz + s * 61) * riverScale);
+        float dist = Mathf.Abs(n - 0.5f) * 2f; // 0..1
+        return Mathf.Clamp01(dist);
+    }
+
+    float RiverMask01(int worldX, int worldZ, float ocean)
+    {
+        if (!minecraftLikeWater || !enableRivers) return 0f;
+
+        // Avoid placing rivers deep into oceans (but still allow them to meet the sea)
+        float avoid = Mathf.InverseLerp(oceanThreshold, 1f, ocean);
+        if (avoid > riverOceanAvoid) return 0f;
+
+        float dist = RiverDistance01(worldX, worldZ);
+        // Convert width into a distance threshold
+        float width = Mathf.Clamp(riverWidth, 0.002f, 0.12f);
+        float m = Mathf.InverseLerp(width, 0f, dist);
+
+        // Sharpen a bit so we have a defined channel
+        m = m * m;
+        return Mathf.Clamp01(m);
     }
 
     public int GetLandHeight(int worldX, int worldZ)
     {
-        float r = Mathf.Lerp(0.85f, 1.25f, roughness);
+        float baseScale = Mathf.Lerp(0.0018f, 0.0105f, roughness);
+        float persistence = Mathf.Lerp(0.35f, 0.55f, roughness);
+        float lacunarity = 2.0f;
 
-        float baseN = FBM01(worldX, worldZ, 0.00105f * r, 4, 2.0f, 0.5f, 17001, -9001);
-        float hillN = FBM01(worldX, worldZ, 0.00225f * r, 4, 2.0f, 0.52f, -31001, 12001);
-        float selN = FBM01(worldX, worldZ, 0.00072f * r, 2, 2.0f, 0.5f, 9001, 7001);
+        float h = 0f;
+        float amp = 1f;
+        float freq = 1f;
 
-        float blended = Mathf.Lerp(baseN, hillN, Mathf.SmoothStep(0.0f, 1.0f, selN));
-        float hills = N11(blended);
-
-        float ridge = Ridged01(worldX, worldZ, 0.00115f * r, 3, 2.0f, 0.55f, 33001, -17001);
-        float mountains = Mathf.Pow(ridge, 2.25f);
-
-        float oceanMask = OceanMask01(worldX, worldZ);
-
-        float h = SeaLevel + 10f + hills * 18f + mountains * 42f;
-
-        if (oceanMask > 0.001f)
+        int s = settings.seed;
+        for (int i = 0; i < 4; i++)
         {
-            float oceanFloor = SeaLevel - 10f + N11(FBM01(worldX, worldZ, 0.0028f * r, 2, 2.0f, 0.5f, 41001, 21001)) * 3.5f;
-            h = Mathf.Lerp(h, oceanFloor, Mathf.Clamp01(oceanMask));
+            float nx = (worldX + s * 17) * baseScale * freq;
+            float nz = (worldZ + s * 17) * baseScale * freq;
+            float n = Mathf.PerlinNoise(nx, nz) - 0.5f;
+            h += n * amp;
+
+            amp *= persistence;
+            freq *= lacunarity;
         }
 
-        int height = Mathf.RoundToInt(h);
+        GetBiomeParams(worldX, worldZ, out _, out _, out _, out float ocean);
+
+        // Continents: pull down land where ocean noise is strong
+        float continental = Mathf.Lerp(0.0f, -0.55f, Mathf.InverseLerp(oceanThreshold, 1.0f, ocean));
+        h += continental;
+
+        int height = SeaLevel + 6 + Mathf.RoundToInt(h * 60f);
         height = Mathf.Clamp(height, 2, VoxelData.ChunkHeight - 2);
 
-        if (minecraftLikeWater && oceanMask > 0.15f && height < SeaLevel - 1)
-            height = SeaLevel - 1;
+        // Rivers carve the terrain (even inland). Minecraft rivers are around sea level.
+        float riverMask = RiverMask01(worldX, worldZ, ocean);
+        if (riverMask > 0f)
+        {
+            float carve = riverMask;
+            carve = Mathf.Lerp(carve, 1f, riverBankBlend * carve); // wider banks
+
+            int carved = height - Mathf.RoundToInt(riverDepth * carve);
+            // Keep river channel close to sea level; allow small variation.
+            carved = Mathf.Min(carved, SeaLevel - 1);
+            height = Mathf.Clamp(carved, 2, VoxelData.ChunkHeight - 2);
+        }
+
+        // Keep inland from dipping too far below sea (prevents endless inland oceans)
+        if (minecraftLikeWater && ocean < oceanThreshold)
+        {
+            if (height < SeaLevel - 1) height = SeaLevel - 1;
+        }
 
         return height;
     }
 
-    float CaveNoise01(int worldX, int worldY, int worldZ)
+    // =========================
+    // Cave generation (improved)
+    // =========================
+
+    float Noise3Cheap(float x, float y, float z)
     {
-        int s = settings.seed;
+        // Unity has only 2D Perlin; combine 3 planes to get a usable 3D-ish noise.
+        float a = Mathf.PerlinNoise(x, z);
+        float b = Mathf.PerlinNoise(x, y);
+        float c = Mathf.PerlinNoise(z, y);
+        return (a + b + c) / 3f;
+    }
 
-        float sx = (worldX + s * 13) * caveScale;
-        float sy = (worldY + s * 29) * caveScale;
-        float sz = (worldZ + s * 41) * caveScale;
-
-        float a = Mathf.PerlinNoise(sx, sy);
-        float b = Mathf.PerlinNoise(sy, sz);
-        float c = Mathf.PerlinNoise(sx, sz);
-
-        float v = (a * 0.34f + b * 0.33f + c * 0.33f);
-
-        float warp = Mathf.PerlinNoise((worldX + s * 97) * caveScale * 0.55f, (worldZ + s * 101) * caveScale * 0.55f);
-        v = Mathf.Lerp(v, warp, 0.18f);
-
-        return v;
+    float Ridged01(float n01)
+    {
+        // 0.5 peak, 0/1 valleys
+        float r = 1f - Mathf.Abs(n01 * 2f - 1f);
+        return Mathf.Clamp01(r);
     }
 
     bool IsCave(int worldX, int worldY, int worldZ, int surfaceY)
     {
         if (!enableCaves) return false;
-        if (worldY <= 4) return false;
+        if (worldY <= 5) return false;
+        if (worldY >= surfaceY - caveMinDepthBelowSurface) return false;
 
-        int minTop = Mathf.Max(0, surfaceY - Mathf.Max(1, caveMinDepthBelowSurface));
-        if (worldY >= minTop) return false;
+        int s = settings.seed;
 
-        float y01 = Mathf.InverseLerp(0f, SeaLevel + 5f, worldY);
-        float t = Mathf.Lerp(caveThreshold - 0.10f, caveThreshold + 0.05f, y01);
+        // Depth: more caves deeper down (Minecraft-like)
+        float depth01 = Mathf.InverseLerp(surfaceY, 0, worldY);
+        float depthBoost = Mathf.Lerp(0.00f, 0.12f, depth01);
 
-        float v = CaveNoise01(worldX, worldY, worldZ);
+        // Spaghetti (ridged) tunnels
+        float sx = (worldX + s * 73) * caveSpaghettiScale;
+        float sy = (worldY + s * 97) * caveSpaghettiScale;
+        float sz = (worldZ + s * 53) * caveSpaghettiScale;
 
-        float rav = Mathf.PerlinNoise((worldX + settings.seed * 211) * caveScale * 0.30f, (worldZ + settings.seed * 223) * caveScale * 0.30f);
-        float band = Mathf.PerlinNoise((worldY + settings.seed * 227) * caveScale * 0.70f, (worldX + settings.seed * 229) * caveScale * 0.10f);
-        float carve = rav * 0.70f + band * 0.30f;
+        float nS = Noise3Cheap(sx, sy, sz);
+        float ridged = Ridged01(nS);
 
-        float extra = Mathf.Lerp(0.0f, 0.09f, carve);
+        // Larger caverns (blobs)
+        float cx = (worldX + s * 147) * caveCavernScale;
+        float cy = (worldY + s * 191) * caveCavernScale;
+        float cz = (worldZ + s * 171) * caveCavernScale;
+        float nC = Noise3Cheap(cx, cy, cz);
 
-        return v > (t - extra);
+        // Original style as a small contribution (keeps variety)
+        float ax = (worldX + s * 13) * caveScale;
+        float ay = (worldY + s * 29) * caveScale;
+        float az = (worldZ + s * 41) * caveScale;
+        float nO = Noise3Cheap(ax, ay, az);
+
+        // Mix and threshold
+        float v = Mathf.Lerp(ridged, nO, 0.25f);
+        bool spaghetti = v > (caveSpaghettiThreshold - depthBoost);
+        bool cavern = nC > (caveCavernThreshold - depthBoost * 0.5f);
+
+        return spaghetti || cavern;
     }
+
+    // =========================
+    // Block sampling (terrain)
+    // =========================
 
     public void GetOreSettings(out OreSettings o)
     {
@@ -351,7 +392,7 @@ public class VoxelWorld : MonoBehaviour
         {
             coal = new OreLayer(countPerChunk: 20, veinSize: 17, yMin: 0, yMax: 127),
             iron = new OreLayer(countPerChunk: 20, veinSize: 9, yMin: 0, yMax: 63),
-            gold = new OreLayer(countPerChunk: 4, veinSize: 13, yMin: 0, yMax: 32),
+            gold = new OreLayer(countPerChunk: 9, veinSize: 9, yMin: 0, yMax: 31),
             redstone = new OreLayer(countPerChunk: 8, veinSize: 7, yMin: 0, yMax: 15),
             diamond = new OreLayer(countPerChunk: 1, veinSize: 8, yMin: 0, yMax: 15),
             lapis = new OreLayer(countPerChunk: 1, veinSize: 7, yMin: 0, yMax: 31),
@@ -380,22 +421,6 @@ public class VoxelWorld : MonoBehaviour
         public OreLayer coal, iron, gold, redstone, lapis, diamond, emerald;
     }
 
-    bool IsBeach(int surfaceY, float oceanMask)
-    {
-        if (surfaceY <= SeaLevel + 1) return true;
-        if (oceanMask > 0.12f && surfaceY <= SeaLevel + 3) return true;
-        return false;
-    }
-
-    bool IsLakeHere(int worldX, int worldZ, int surfaceY, float oceanMask)
-    {
-        if (oceanMask > 0.10f) return false;
-        if (surfaceY >= SeaLevel - 1) return false;
-        int h = Hash3(worldX, surfaceY, worldZ);
-        int v = Mathf.Abs(h) % 1000;
-        return v < 6;
-    }
-
     public BlockType GetGeneratedBlock(int worldX, int worldY, int worldZ)
     {
         if (worldY < 0 || worldY >= VoxelData.ChunkHeight) return BlockType.Air;
@@ -406,38 +431,52 @@ public class VoxelWorld : MonoBehaviour
             if (worldY < maxY) return BlockType.Bedrock;
         }
 
-        float oceanMask = OceanMask01(worldX, worldZ);
+        GetBiomeParams(worldX, worldZ, out _, out _, out _, out float ocean);
         int surfaceY = GetLandHeight(worldX, worldZ);
 
-        bool ocean = minecraftLikeWater && oceanMask > 0.15f;
-        bool lake = minecraftLikeWater && IsLakeHere(worldX, worldZ, surfaceY, oceanMask);
+        float riverMask = RiverMask01(worldX, worldZ, ocean);
+
+        bool isOcean = minecraftLikeWater && ocean >= oceanThreshold;
+        bool isRiver = minecraftLikeWater && riverMask > 0f;
+
+        int waterLevel = SeaLevel;
 
         if (worldY > surfaceY)
         {
-            if (minecraftLikeWater && worldY <= SeaLevel)
+            if (minecraftLikeWater && worldY <= waterLevel)
             {
-                int depth = SeaLevel - surfaceY;
-                if ((ocean && depth >= minWaterDepth) || lake)
+                if (isRiver)
+                {
+                    // Rivers: always fill to sea level
                     return BlockType.Water;
+                }
+
+                if (isOcean)
+                {
+                    int depth = waterLevel - surfaceY;
+                    if (depth >= minWaterDepth) return BlockType.Water;
+                }
             }
             return BlockType.Air;
         }
 
-        int depthBelow = surfaceY - worldY;
+        bool underwater = minecraftLikeWater && surfaceY < waterLevel && (isOcean || isRiver);
 
         if (worldY == surfaceY)
         {
-            if (minecraftLikeWater && surfaceY < SeaLevel) return BlockType.Sand;
-            if (IsBeach(surfaceY, oceanMask)) return BlockType.Sand;
+            if (underwater)
+            {
+                // Sandy shores / riverbeds
+                return BlockType.Sand;
+            }
             return BlockType.Grass;
         }
 
-        int soil = Mathf.Clamp(topSoilDepth, 1, 6);
+        int depthBelow = surfaceY - worldY;
 
-        if (depthBelow <= soil)
+        if (depthBelow <= Mathf.Max(1, topSoilDepth))
         {
-            if (minecraftLikeWater && surfaceY <= SeaLevel + 2 && depthBelow <= 3) return BlockType.Sand;
-            if (oceanMask > 0.12f && surfaceY <= SeaLevel + 4 && depthBelow <= 4) return BlockType.Sand;
+            if (underwater && depthBelow <= 3) return BlockType.Sand;
             return BlockType.Dirt;
         }
 
@@ -446,6 +485,10 @@ public class VoxelWorld : MonoBehaviour
 
         return BlockType.Stone;
     }
+
+    // =========================
+    // World storage / edits
+    // =========================
 
     public BlockType GetBlock(Vector3Int worldPos)
     {

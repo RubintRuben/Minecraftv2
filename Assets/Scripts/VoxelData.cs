@@ -5,8 +5,6 @@ public static class VoxelData
     public const int ChunkSize = 16;
     public const int ChunkHeight = 128;
 
-    public const float WaterVisualHeight = 0.875f;
-
     public static readonly Vector3[] Verts = new Vector3[8]
     {
         new Vector3(0,0,0),
@@ -67,9 +65,10 @@ public enum BlockType : byte
 
     CoalOre = 10,
     IronOre = 11,
-    GoldOre = 12,
-    RedstoneOre = 13,
-    LapisOre = 14,
-    DiamondOre = 15,
-    EmeraldOre = 16
+    RedstoneOre = 12,
+    LapisOre = 13,
+    DiamondOre = 14,
+    EmeraldOre = 15,
+
+    GoldOre = 16
 }

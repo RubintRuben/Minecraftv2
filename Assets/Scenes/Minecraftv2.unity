@@ -486,7 +486,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::BlockInteractor
   world: {fileID: 1172525743}
   reach: 6
-  placeType: 1
+  placeType: 5
   outline: {fileID: 337001635}
   playerController: {fileID: 709717488}
   hitMask:
@@ -720,7 +720,7 @@ Transform:
   m_GameObject: {fileID: 709717487}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 816.9208, y: 0, z: 1185.4005}
+  m_LocalPosition: {x: 0, y: 100, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -738,6 +738,8 @@ GameObject:
   - component: {fileID: 1172525744}
   - component: {fileID: 1172525743}
   - component: {fileID: 1172525745}
+  - component: {fileID: 1172525746}
+  - component: {fileID: 1172525747}
   m_Layer: 0
   m_Name: World
   m_TagString: Untagged
@@ -757,47 +759,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ba7a53ab9ee07734aa503eb6dc30cbd9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VoxelWorld
-  materials:
-    grassTop: {fileID: 2100000, guid: f8109f5707480de4ea1490ae77983055, type: 2}
-    grassSide: {fileID: 2100000, guid: 6de4c0687ed4005409d55350ebd2a11c, type: 2}
-    dirt: {fileID: 2100000, guid: db0706277e7d93e4d81a52a6943d1caf, type: 2}
-    stone: {fileID: 2100000, guid: 8485df145c15ce84fbd1feb3726136a7, type: 2}
-    sand: {fileID: 2100000, guid: 1f5c3aea6ef2cae4b97cff085994eebe, type: 2}
-    water: {fileID: 2100000, guid: 401527fc1c028064a99d8f8fd870668f, type: 2}
-    logTop: {fileID: 2100000, guid: f5b6103de77332b418c66a3623a933b2, type: 2}
-    logSide: {fileID: 2100000, guid: 63805d469f92ee948bf69c251f2dc5f4, type: 2}
-    leaves: {fileID: 2100000, guid: a9ec74df2a60cc849a82f06a9fd77963, type: 2}
-    bedrock: {fileID: 2100000, guid: 5bd4227b180611f4eb65e5170a4a17cc, type: 2}
-    coalOre: {fileID: 2100000, guid: dcf98d6f0e52e2e44a617fb4d10f2eac, type: 2}
-    ironOre: {fileID: 2100000, guid: bf3de63b7bd57484fb56df9afd7a185b, type: 2}
-    goldOre: {fileID: 2100000, guid: 009d961d2230dbe4586861db8dc0e228, type: 2}
-    redstoneOre: {fileID: 2100000, guid: 8ba06e30d5d9d144fa815d74c0537f84, type: 2}
-    lapisOre: {fileID: 2100000, guid: fe1ce3472e3efee47ad947615a62f5e9, type: 2}
-    diamondOre: {fileID: 2100000, guid: 2633a1aa2311ebf4387dc55c796e2e96, type: 2}
-    emeraldOre: {fileID: 2100000, guid: dbfd1df4c477e5c49a210a076ae7f44b, type: 2}
-  biomeTints:
-    plainsGrass: {r: 0.5686275, g: 0.7411765, b: 0.34901962, a: 1}
-    plainsFoliage: {r: 0.46666667, g: 0.67058825, b: 0.18431373, a: 1}
-  settings:
-    player: {fileID: 709717491}
-    viewDistanceInChunks: 6
-    seed: 12345
-  terrainColliderMaterial: {fileID: 13400000, guid: 6cf2eebc656adab4dbe11164c61a6dba, type: 2}
-  roughness: 0.25
-  minecraftLikeWater: 1
-  oceanScale: 0.0018
-  oceanThreshold: 0.52
-  minWaterDepth: 2
-  topSoilDepth: 4
-  enableCaves: 1
-  caveScale: 0.045
-  caveThreshold: 0.78
-  caveMinDepthBelowSurface: 6
-  sandFalls: 1
-  sandChecksPerFrame: 64
-  fallingSandSpawnYOffset: 0.15
-  fallingSandLinearDrag: 0.05
-  fallingSandAngularDrag: 0.05
+  chunkGenerator: {fileID: 1172525747}
 --- !u!4 &1172525744
 Transform:
   m_ObjectHideFlags: 0
@@ -829,6 +791,65 @@ MonoBehaviour:
   frameSize: 16
   frames: 32
   fps: 8
+--- !u!114 &1172525746
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1172525741}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0a7c672c64a4ca1409c44012c513aec7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TerrainGenerator
+  seed: 12345
+  randomSeed: 0
+  seaLevel: 40
+  baseHeight: 50
+  continentScale: 900
+  heightScale: 140
+  heightAmp: 36
+  mountainMaskScale: 900
+  mountainScale: 220
+  mountainAmp: 62
+  dirtThickness: 4
+  sandThickness: 4
+  caveScale: 36
+  caveThreshold: 0.62
+--- !u!114 &1172525747
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1172525741}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 89aa2cd8eaa5e134bae7b208067083af, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ChunkGenerator
+  generator: {fileID: 1172525746}
+  player: {fileID: 709717491}
+  chunkSize: 16
+  worldHeight: 128
+  viewDistanceChunks: 6
+  waterVisualHeight: 0.9
+  grassTop: {fileID: 2100000, guid: f8109f5707480de4ea1490ae77983055, type: 2}
+  grassSide: {fileID: 2100000, guid: 6de4c0687ed4005409d55350ebd2a11c, type: 2}
+  dirt: {fileID: 2100000, guid: db0706277e7d93e4d81a52a6943d1caf, type: 2}
+  stone: {fileID: 2100000, guid: 8485df145c15ce84fbd1feb3726136a7, type: 2}
+  sand: {fileID: 2100000, guid: 1f5c3aea6ef2cae4b97cff085994eebe, type: 2}
+  bedrock: {fileID: 2100000, guid: 5bd4227b180611f4eb65e5170a4a17cc, type: 2}
+  water: {fileID: 2100000, guid: 401527fc1c028064a99d8f8fd870668f, type: 2}
+  coalOre: {fileID: 2100000, guid: dcf98d6f0e52e2e44a617fb4d10f2eac, type: 2}
+  ironOre: {fileID: 2100000, guid: bf3de63b7bd57484fb56df9afd7a185b, type: 2}
+  goldOre: {fileID: 2100000, guid: 009d961d2230dbe4586861db8dc0e228, type: 2}
+  redstoneOre: {fileID: 2100000, guid: 8ba06e30d5d9d144fa815d74c0537f84, type: 2}
+  lapisOre: {fileID: 2100000, guid: fe1ce3472e3efee47ad947615a62f5e9, type: 2}
+  diamondOre: {fileID: 2100000, guid: 2633a1aa2311ebf4387dc55c796e2e96, type: 2}
+  emeraldOre: {fileID: 2100000, guid: dbfd1df4c477e5c49a210a076ae7f44b, type: 2}
+  terrainPhysicMaterial: {fileID: 13400000, guid: 6cf2eebc656adab4dbe11164c61a6dba, type: 2}
 --- !u!1 &1426906494
 GameObject:
   m_ObjectHideFlags: 0

@@ -4,6 +4,9 @@ using UnityEngine;
 [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer), typeof(MeshCollider))]
 public class Chunk : MonoBehaviour
 {
+    public VoxelWorld World => world;
+    public Vector2Int Coord => coord;
+
     private VoxelWorld world;
     private Vector2Int coord;
 
@@ -26,15 +29,25 @@ public class Chunk : MonoBehaviour
     const int SM_Bedrock = 9;
     const int SM_Coal = 10;
     const int SM_Iron = 11;
-    const int SM_Gold = 12;
-    const int SM_Redstone = 13;
-    const int SM_Lapis = 14;
-    const int SM_Diamond = 15;
-    const int SM_Emerald = 16;
+    const int SM_Redstone = 12;
+    const int SM_Lapis = 13;
+    const int SM_Diamond = 14;
+    const int SM_Emerald = 15;
+    const int SM_Gold = 16;
 
     const int SubmeshCount = 17;
 
-    const int TreeEdgePadding = 2;
+    // GC/alloc csökkentés
+    private readonly List<Vector3> verts = new List<Vector3>(8192);
+    private readonly List<Vector2> uvs = new List<Vector2>(8192);
+    private readonly List<Color> cols = new List<Color>(8192);
+    private readonly List<int>[] tris = new List<int>[SubmeshCount];
+
+    private readonly List<Vector3> cVerts = new List<Vector3>(8192);
+    private readonly List<int> cTris = new List<int>(8192);
+
+    private Mesh mesh;
+    private Mesh colliderMesh;
 
     public void Init(VoxelWorld world, Vector2Int coord, VoxelWorld.BlockMaterials materials)
     {
@@ -63,18 +76,25 @@ public class Chunk : MonoBehaviour
             mats.bedrock,
             mats.coalOre,
             mats.ironOre,
-            mats.goldOre,
             mats.redstoneOre,
             mats.lapisOre,
             mats.diamondOre,
-            mats.emeraldOre
+            mats.emeraldOre,
+            mats.goldOre
         };
 
         blocks = new BlockType[VoxelData.ChunkSize, VoxelData.ChunkHeight, VoxelData.ChunkSize];
 
+        for (int i = 0; i < SubmeshCount; i++)
+            tris[i] = new List<int>(8192);
+
         GenerateBaseTerrain();
-        GenerateOresMinecraftLike();
-        GenerateTreesBiomePatches();
+
+        // feature külön fájlban
+        ChunkFeatureGenerator.Generate(this);
+
+        mesh = new Mesh();
+        colliderMesh = new Mesh();
 
         Rebuild();
     }
@@ -83,6 +103,12 @@ public class Chunk : MonoBehaviour
     {
         if (gameObject.activeSelf != active)
             gameObject.SetActive(active);
+    }
+
+    public void SetColliderEnabled(bool enabled)
+    {
+        if (meshCollider != null && meshCollider.enabled != enabled)
+            meshCollider.enabled = enabled;
     }
 
     public Vector3Int WorldToLocal(Vector3Int worldPos)
@@ -99,21 +125,25 @@ public class Chunk : MonoBehaviour
         return new Vector3Int(wx, localPos.y, wz);
     }
 
-    public BlockType GetBlockLocal(Vector3Int localPos)
+    // Feature gen API
+    public BlockType GetBlockLocal(int x, int y, int z)
     {
-        if (localPos.x < 0 || localPos.x >= VoxelData.ChunkSize) return BlockType.Air;
-        if (localPos.z < 0 || localPos.z >= VoxelData.ChunkSize) return BlockType.Air;
-        if (localPos.y < 0 || localPos.y >= VoxelData.ChunkHeight) return BlockType.Air;
-        return blocks[localPos.x, localPos.y, localPos.z];
+        if (x < 0 || x >= VoxelData.ChunkSize) return BlockType.Air;
+        if (z < 0 || z >= VoxelData.ChunkSize) return BlockType.Air;
+        if (y < 0 || y >= VoxelData.ChunkHeight) return BlockType.Air;
+        return blocks[x, y, z];
     }
 
-    public void SetBlockLocal(Vector3Int localPos, BlockType type)
+    public void SetBlockLocal(int x, int y, int z, BlockType type)
     {
-        if (localPos.x < 0 || localPos.x >= VoxelData.ChunkSize) return;
-        if (localPos.z < 0 || localPos.z >= VoxelData.ChunkSize) return;
-        if (localPos.y < 0 || localPos.y >= VoxelData.ChunkHeight) return;
-        blocks[localPos.x, localPos.y, localPos.z] = type;
+        if (x < 0 || x >= VoxelData.ChunkSize) return;
+        if (z < 0 || z >= VoxelData.ChunkSize) return;
+        if (y < 0 || y >= VoxelData.ChunkHeight) return;
+        blocks[x, y, z] = type;
     }
+
+    public BlockType GetBlockLocal(Vector3Int localPos) => GetBlockLocal(localPos.x, localPos.y, localPos.z);
+    public void SetBlockLocal(Vector3Int localPos, BlockType type) => SetBlockLocal(localPos.x, localPos.y, localPos.z, type);
 
     private void GenerateBaseTerrain()
     {
@@ -130,270 +160,14 @@ public class Chunk : MonoBehaviour
         }
     }
 
-    private void GenerateOresMinecraftLike()
-    {
-        world.GetOreSettings(out var o);
-
-        int chunkSeed = world.Hash3(coord.x, 0, coord.y);
-        System.Random rng = new System.Random(chunkSeed);
-
-        PlaceVeins(rng, BlockType.CoalOre, o.coal);
-        PlaceVeins(rng, BlockType.IronOre, o.iron);
-        PlaceVeins(rng, BlockType.GoldOre, o.gold, triangularY: true);
-        PlaceVeins(rng, BlockType.LapisOre, o.lapis, triangularY: true);
-        PlaceVeins(rng, BlockType.RedstoneOre, o.redstone);
-        PlaceVeins(rng, BlockType.DiamondOre, o.diamond);
-
-        int avgSurface = EstimateChunkAverageSurface();
-        if (avgSurface >= VoxelWorld.SeaLevel + 22)
-            PlaceVeins(rng, BlockType.EmeraldOre, o.emerald, emeraldScatter: true);
-    }
-
-    private int EstimateChunkAverageSurface()
-    {
-        int sum = 0;
-        int cnt = 0;
-        for (int x = 0; x < VoxelData.ChunkSize; x += 4)
-        for (int z = 0; z < VoxelData.ChunkSize; z += 4)
-        {
-            int wx = coord.x * VoxelData.ChunkSize + x;
-            int wz = coord.y * VoxelData.ChunkSize + z;
-            sum += world.GetLandHeight(wx, wz);
-            cnt++;
-        }
-        return (cnt == 0) ? VoxelWorld.SeaLevel : (sum / cnt);
-    }
-
-    private void PlaceVeins(System.Random rng, BlockType oreType, VoxelWorld.OreLayer layer, bool triangularY = false, bool emeraldScatter = false)
-    {
-        int yMin = Mathf.Clamp(layer.yMin, 0, VoxelData.ChunkHeight - 1);
-        int yMax = Mathf.Clamp(layer.yMax, 0, VoxelData.ChunkHeight - 1);
-        if (yMax < yMin) { int t = yMin; yMin = yMax; yMax = t; }
-
-        for (int i = 0; i < layer.countPerChunk; i++)
-        {
-            int x = rng.Next(0, VoxelData.ChunkSize);
-            int z = rng.Next(0, VoxelData.ChunkSize);
-
-            int y;
-            if (triangularY)
-            {
-                int a = rng.Next(yMin, yMax + 1);
-                int b = rng.Next(yMin, yMax + 1);
-                y = (a + b) / 2;
-            }
-            else
-            {
-                y = rng.Next(yMin, yMax + 1);
-            }
-
-            if (y < 1 || y >= VoxelData.ChunkHeight - 1) continue;
-
-            if (emeraldScatter)
-            {
-                if (blocks[x, y, z] == BlockType.Stone)
-                    blocks[x, y, z] = oreType;
-                continue;
-            }
-
-            int veinSize = Mathf.Max(1, layer.veinSize);
-
-            int vx = x, vy = y, vz = z;
-            int steps = veinSize + rng.Next(0, Mathf.Max(1, veinSize / 2));
-
-            for (int v = 0; v < steps; v++)
-            {
-                if (vx < 1 || vx >= VoxelData.ChunkSize - 1) break;
-                if (vz < 1 || vz >= VoxelData.ChunkSize - 1) break;
-                if (vy < 1 || vy >= VoxelData.ChunkHeight - 1) break;
-
-                if (blocks[vx, vy, vz] == BlockType.Stone)
-                    blocks[vx, vy, vz] = oreType;
-
-                int dir = rng.Next(0, 12);
-                switch (dir)
-                {
-                    case 0: vx++; break;
-                    case 1: vx--; break;
-                    case 2: vz++; break;
-                    case 3: vz--; break;
-                    case 4: vy++; break;
-                    case 5: vy--; break;
-                    case 6: vx++; vz++; break;
-                    case 7: vx--; vz--; break;
-                    case 8: vx++; vz--; break;
-                    case 9: vx--; vz++; break;
-                    case 10: vy++; vx += (rng.Next(0, 2) == 0 ? -1 : 1); break;
-                    case 11: vy--; vz += (rng.Next(0, 2) == 0 ? -1 : 1); break;
-                }
-            }
-        }
-    }
-
-    private void GenerateTreesBiomePatches()
-    {
-        for (int x = TreeEdgePadding; x < VoxelData.ChunkSize - TreeEdgePadding; x++)
-        {
-            for (int z = TreeEdgePadding; z < VoxelData.ChunkSize - TreeEdgePadding; z++)
-            {
-                int wx = coord.x * VoxelData.ChunkSize + x;
-                int wz = coord.y * VoxelData.ChunkSize + z;
-
-                world.GetBiomeParams(wx, wz, out float temp, out float rain, out float forest, out float ocean);
-
-                if (ocean < world.oceanThreshold) continue;
-
-                int surfaceY = world.GetLandHeight(wx, wz);
-                if (surfaceY <= VoxelWorld.SeaLevel + 1) continue;
-                if (surfaceY < 1 || surfaceY >= VoxelData.ChunkHeight - 10) continue;
-                if (blocks[x, surfaceY, z] != BlockType.Grass) continue;
-
-                bool isForest = forest > 0.58f;
-
-                float humidityFactor = Mathf.Lerp(0.55f, 1.0f, rain);
-                float chance = isForest ? (0.030f * humidityFactor) : (0.006f * humidityFactor);
-
-                int h = world.Hash3(wx, surfaceY, wz);
-                float r01 = (Mathf.Abs(h) % 10000) / 10000f;
-                if (r01 > chance) continue;
-
-                float bigChance = isForest ? 0.10f : 0.03f;
-                float r02 = (Mathf.Abs(world.Hash3(wx + 17, surfaceY + 3, wz - 9)) % 10000) / 10000f;
-                bool big = r02 < bigChance;
-
-                if (big)
-                    TryPlaceBigOak(x, surfaceY, z, wx, wz);
-                else
-                    TryPlaceSmallOak(x, surfaceY, z, wx, wz);
-            }
-        }
-    }
-
-    private bool TryPlaceSmallOak(int x, int surfaceY, int z, int wx, int wz)
-    {
-        int trunkH = 4 + (Mathf.Abs(world.Hash3(wx, surfaceY, wz)) % 3);
-
-        int trunkBelowLeaves = 2 + (Mathf.Abs(world.Hash3(wx + 5, surfaceY, wz + 5)) % 2);
-        int leafBaseY = surfaceY + trunkBelowLeaves;
-        int topY = surfaceY + trunkH;
-
-        if (topY + 3 >= VoxelData.ChunkHeight) return false;
-
-        for (int y = surfaceY + 1; y <= topY; y++)
-            if (blocks[x, y, z] != BlockType.Air) return false;
-
-        for (int y = surfaceY + 1; y <= topY; y++)
-            blocks[x, y, z] = BlockType.Log;
-
-        PlaceLeavesSquare(x, z, leafBaseY + 1, 2, false);
-        PlaceLeavesSquare(x, z, leafBaseY + 2, 2, true);
-        PlaceLeavesSquare(x, z, leafBaseY + 3, 1, true);
-        PlaceLeavesCross(x, z, leafBaseY + 4);
-
-        return true;
-    }
-
-    private bool TryPlaceBigOak(int x, int surfaceY, int z, int wx, int wz)
-    {
-        int trunkH = 8 + (Mathf.Abs(world.Hash3(wx, surfaceY, wz)) % 5);
-        int trunkBelowLeaves = 3;
-        int leafBaseY = surfaceY + trunkBelowLeaves;
-        int topY = surfaceY + trunkH;
-
-        if (topY + 4 >= VoxelData.ChunkHeight) return false;
-
-        for (int y = surfaceY + 1; y <= topY; y++)
-            if (blocks[x, y, z] != BlockType.Air) return false;
-
-        for (int y = surfaceY + 1; y <= topY; y++)
-            blocks[x, y, z] = BlockType.Log;
-
-        PlaceLeavesSquare(x, z, leafBaseY + 1, 3, false);
-        PlaceLeavesSquare(x, z, leafBaseY + 2, 3, true);
-        PlaceLeavesSquare(x, z, leafBaseY + 3, 2, true);
-        PlaceLeavesSquare(x, z, leafBaseY + 4, 2, false);
-        PlaceLeavesCross(x, z, leafBaseY + 5);
-
-        int branches = 2 + (Mathf.Abs(world.Hash3(wx + 31, surfaceY, wz - 7)) % 2);
-        for (int i = 0; i < branches; i++)
-        {
-            int dir = (Mathf.Abs(world.Hash3(wx + i * 19, surfaceY + i, wz + i * 13)) % 4);
-            int dx = (dir == 0) ? 1 : (dir == 1) ? -1 : 0;
-            int dz = (dir == 2) ? 1 : (dir == 3) ? -1 : 0;
-
-            int by = leafBaseY + 2 + i;
-            int len = 2 + (Mathf.Abs(world.Hash3(wx + 77, by, wz + 77)) % 2);
-
-            int ax = x, az = z;
-            for (int s = 0; s < len; s++)
-            {
-                ax += dx; az += dz;
-                if (ax < 1 || ax >= VoxelData.ChunkSize - 1) break;
-                if (az < 1 || az >= VoxelData.ChunkSize - 1) break;
-                if (by < 1 || by >= VoxelData.ChunkHeight - 1) break;
-
-                if (blocks[ax, by, az] == BlockType.Air)
-                    blocks[ax, by, az] = BlockType.Log;
-
-                PlaceLeavesSquare(ax, az, by + 1, 1, true);
-                PlaceLeavesCross(ax, az, by + 2);
-            }
-        }
-
-        return true;
-    }
-
-    private void PlaceLeavesSquare(int cx, int cz, int y, int r, bool allowCorners)
-    {
-        if (y < 0 || y >= VoxelData.ChunkHeight) return;
-
-        for (int dx = -r; dx <= r; dx++)
-        for (int dz = -r; dz <= r; dz++)
-        {
-            if (!allowCorners && Mathf.Abs(dx) == r && Mathf.Abs(dz) == r) continue;
-
-            int ax = cx + dx;
-            int az = cz + dz;
-            if (ax < 0 || ax >= VoxelData.ChunkSize) continue;
-            if (az < 0 || az >= VoxelData.ChunkSize) continue;
-
-            if (blocks[ax, y, az] == BlockType.Air)
-                blocks[ax, y, az] = BlockType.Leaves;
-        }
-    }
-
-    private void PlaceLeavesCross(int cx, int cz, int y)
-    {
-        if (y < 0 || y >= VoxelData.ChunkHeight) return;
-
-        int[,] pts = new int[,]
-        {
-            {0,0},{1,0},{-1,0},{0,1},{0,-1}
-        };
-
-        for (int i = 0; i < pts.GetLength(0); i++)
-        {
-            int ax = cx + pts[i, 0];
-            int az = cz + pts[i, 1];
-            if (ax < 0 || ax >= VoxelData.ChunkSize) continue;
-            if (az < 0 || az >= VoxelData.ChunkSize) continue;
-
-            if (blocks[ax, y, az] == BlockType.Air)
-                blocks[ax, y, az] = BlockType.Leaves;
-        }
-    }
-
     public void Rebuild()
     {
-        List<Vector3> verts = new List<Vector3>(8192);
-        List<Vector2> uvs = new List<Vector2>(8192);
-        List<Color> cols = new List<Color>(8192);
-
-        List<int>[] tris = new List<int>[SubmeshCount];
-        for (int i = 0; i < SubmeshCount; i++) tris[i] = new List<int>(8192);
-
-        List<Vector3> cVerts = new List<Vector3>(8192);
-        List<int> cTris = new List<int>(8192);
+        verts.Clear();
+        uvs.Clear();
+        cols.Clear();
+        cVerts.Clear();
+        cTris.Clear();
+        for (int i = 0; i < SubmeshCount; i++) tris[i].Clear();
 
         int vertIndex = 0;
         int cVertIndex = 0;
@@ -417,6 +191,9 @@ public class Chunk : MonoBehaviour
                 Vector3Int neighbor = local + Vector3Int.RoundToInt(VoxelData.FaceChecks[face]);
                 BlockType nb = GetNeighborBlock(neighbor);
 
+                // VÍZ + SZILÁRD találkozás:
+                // - Szilárd: rajzolj air vagy water felé (part látszódik)
+                // - Water: csak air felé (így nincs z-fighting a parton)
                 if (bt == BlockType.Water)
                 {
                     if (nb != BlockType.Air) continue;
@@ -435,12 +212,7 @@ public class Chunk : MonoBehaviour
                 for (int i = 0; i < 4; i++)
                 {
                     int v = VoxelData.Tris[face, i];
-                    Vector3 vv = VoxelData.Verts[v];
-
-                    if (bt == BlockType.Water && vv.y > 0.5f)
-                        vv.y = VoxelData.WaterVisualHeight;
-
-                    verts.Add(new Vector3(x, y, z) + vv);
+                    verts.Add(new Vector3(x, y, z) + VoxelData.Verts[v]);
                     uvs.Add(VoxelData.BaseUVs[i]);
                     cols.Add(vc);
                 }
@@ -472,25 +244,31 @@ public class Chunk : MonoBehaviour
             }
         }
 
-        Mesh m = new Mesh();
-        m.indexFormat = (verts.Count > 65000) ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
-        m.SetVertices(verts);
-        m.SetUVs(0, uvs);
-        m.SetColors(cols);
-        m.subMeshCount = SubmeshCount;
-        for (int i = 0; i < SubmeshCount; i++) m.SetTriangles(tris[i], i);
-        m.RecalculateNormals();
-        m.RecalculateBounds();
-        meshFilter.sharedMesh = m;
+        mesh.Clear();
+        mesh.indexFormat = (verts.Count > 65000)
+            ? UnityEngine.Rendering.IndexFormat.UInt32
+            : UnityEngine.Rendering.IndexFormat.UInt16;
 
-        Mesh cm = new Mesh();
-        cm.indexFormat = (cVerts.Count > 65000) ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
-        cm.SetVertices(cVerts);
-        cm.SetTriangles(cTris, 0);
-        cm.RecalculateNormals();
-        cm.RecalculateBounds();
+        mesh.SetVertices(verts);
+        mesh.SetUVs(0, uvs);
+        mesh.SetColors(cols);
+        mesh.subMeshCount = SubmeshCount;
+        for (int i = 0; i < SubmeshCount; i++) mesh.SetTriangles(tris[i], i);
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
+        meshFilter.sharedMesh = mesh;
+
+        colliderMesh.Clear();
+        colliderMesh.indexFormat = (cVerts.Count > 65000)
+            ? UnityEngine.Rendering.IndexFormat.UInt32
+            : UnityEngine.Rendering.IndexFormat.UInt16;
+
+        colliderMesh.SetVertices(cVerts);
+        colliderMesh.SetTriangles(cTris, 0);
+        colliderMesh.RecalculateNormals();
+        colliderMesh.RecalculateBounds();
         meshCollider.sharedMesh = null;
-        meshCollider.sharedMesh = cm;
+        meshCollider.sharedMesh = colliderMesh;
     }
 
     private int PickSubmesh(BlockType bt, int face)
