@@ -1,359 +1,443 @@
-using System;
 using UnityEngine;
 
 public static class ChunkFeatureGenerator
 {
-    private const int TreeEdgePadding = 2;
-
     public static void Generate(Chunk c)
     {
-        GenerateOres(c);
-        GenerateTreesLikeBeforeButTopLeaf(c);
-        GenerateShrubs(c);
+        var w = c.World;
+
+        CarveCaves(c, w);
+        GenerateOres(c, w);
+        GenerateClayPatches(c, w);
+        GenerateSurfaceFloraAndTrees(c, w);
     }
 
-    // -----------------------
-    // ORES
-    // -----------------------
-    private static void GenerateOres(Chunk c)
+    static void CarveCaves(Chunk c, VoxelWorld w)
     {
-        var w = c.World;
-        w.GetOreSettings(out var o);
+        int seed = w.Hash3(c.Coord.x, 98765, c.Coord.y);
+        System.Random rng = new System.Random(seed);
 
-        int chunkSeed = w.Hash3(c.Coord.x, 0, c.Coord.y);
-        System.Random rng = new System.Random(chunkSeed);
+        int caveCount = rng.Next(1, 4); 
 
-        PlaceVeins(c, rng, BlockType.CoalOre, o.coal);
-        PlaceVeins(c, rng, BlockType.IronOre, o.iron);
-        PlaceVeins(c, rng, BlockType.GoldOre, o.gold);
-        PlaceVeins(c, rng, BlockType.LapisOre, o.lapis, triangularY: true);
-        PlaceVeins(c, rng, BlockType.RedstoneOre, o.redstone);
-        PlaceVeins(c, rng, BlockType.DiamondOre, o.diamond);
-
-        int avgSurface = EstimateChunkAverageSurface(c);
-        if (avgSurface >= VoxelWorld.SeaLevel + 22)
-            PlaceVeins(c, rng, BlockType.EmeraldOre, o.emerald, emeraldScatter: true);
-    }
-
-    private static int EstimateChunkAverageSurface(Chunk c)
-    {
-        var w = c.World;
-        int sum = 0;
-        int cnt = 0;
-
-        for (int x = 0; x < VoxelData.ChunkSize; x += 4)
-        for (int z = 0; z < VoxelData.ChunkSize; z += 4)
+        for (int i = 0; i < caveCount; i++)
         {
-            int wx = c.Coord.x * VoxelData.ChunkSize + x;
-            int wz = c.Coord.y * VoxelData.ChunkSize + z;
-            sum += w.GetLandHeight(wx, wz);
-            cnt++;
+            double startX = rng.NextDouble() * 16.0;
+            double startZ = rng.NextDouble() * 16.0;
+            double startY = rng.Next(10, 60);
+
+            double yaw = rng.NextDouble() * Mathf.PI * 2;
+            double pitch = (rng.NextDouble() - 0.5) * 0.5;
+
+            int length = rng.Next(80, 150);
+            double radius = rng.NextDouble() * 1.5 + 1.5;
+
+            WormCave(c, w, rng, startX, startY, startZ, yaw, pitch, length, radius);
         }
-
-        return (cnt == 0) ? VoxelWorld.SeaLevel : (sum / cnt);
     }
 
-    private static void PlaceVeins(
-        Chunk c,
-        System.Random rng,
-        BlockType oreType,
-        VoxelWorld.OreLayer layer,
-        bool triangularY = false,
-        bool emeraldScatter = false)
+    static void WormCave(Chunk c, VoxelWorld w, System.Random rng, double x, double y, double z, double yaw, double pitch, int len, double rad)
     {
-        for (int i = 0; i < layer.countPerChunk; i++)
+        double yawDelta = 0;
+        double pitchDelta = 0;
+
+        for (int i = 0; i < len; i++)
         {
-            int x = rng.Next(0, VoxelData.ChunkSize);
-            int z = rng.Next(0, VoxelData.ChunkSize);
+            x += System.Math.Cos(yaw) * System.Math.Cos(pitch);
+            z += System.Math.Sin(yaw) * System.Math.Cos(pitch);
+            y += System.Math.Sin(pitch);
 
-            int y;
-            if (triangularY)
-            {
-                int a = rng.Next(layer.yMin, layer.yMax + 1);
-                int b = rng.Next(layer.yMin, layer.yMax + 1);
-                y = (a + b) / 2;
-            }
-            else
-            {
-                y = rng.Next(layer.yMin, Mathf.Min(layer.yMax + 1, VoxelData.ChunkHeight));
-            }
+            yawDelta += (rng.NextDouble() - 0.5) * 0.1;
+            pitchDelta += (rng.NextDouble() - 0.5) * 0.1;
+            yaw += yawDelta;
+            pitch += pitchDelta;
+            pitch = Mathf.Clamp((float)pitch, -1.0f, 1.0f);
 
-            if (y < 1 || y >= VoxelData.ChunkHeight - 1) continue;
+            yawDelta *= 0.9;
+            pitchDelta *= 0.9;
 
-            if (emeraldScatter)
+            if (rng.Next(50) == 0)
             {
-                if (c.GetBlockLocal(x, y, z) == BlockType.Stone)
-                    c.SetBlockLocal(x, y, z, oreType);
-                continue;
+                WormCave(c, w, rng, x, y, z, rng.NextDouble() * Mathf.PI * 2, (rng.NextDouble() - 0.5) * 0.5, len / 2, rad * 0.8);
             }
 
-            int veinSize = Mathf.Max(1, layer.veinSize);
-            int vx = x, vy = y, vz = z;
+            int r = Mathf.CeilToInt((float)rad);
+            int minX = Mathf.FloorToInt((float)x - r);
+            int maxX = Mathf.FloorToInt((float)x + r);
+            int minY = Mathf.FloorToInt((float)y - r);
+            int maxY = Mathf.FloorToInt((float)y + r);
+            int minZ = Mathf.FloorToInt((float)z - r);
+            int maxZ = Mathf.FloorToInt((float)z + r);
 
-            for (int v = 0; v < veinSize; v++)
+            for (int xx = minX; xx <= maxX; xx++)
+            for (int yy = minY; yy <= maxY; yy++)
+            for (int zz = minZ; zz <= maxZ; zz++)
             {
-                if (vx < 1 || vx >= VoxelData.ChunkSize - 1) break;
-                if (vz < 1 || vz >= VoxelData.ChunkSize - 1) break;
-                if (vy < 1 || vy >= VoxelData.ChunkHeight - 1) break;
-
-                if (c.GetBlockLocal(vx, vy, vz) == BlockType.Stone)
-                    c.SetBlockLocal(vx, vy, vz, oreType);
-
-                int dir = rng.Next(0, 6);
-                switch (dir)
+                double dx = xx + 0.5 - x;
+                double dy = yy + 0.5 - y;
+                double dz = zz + 0.5 - z;
+                if (dx * dx + dy * dy + dz * dz < rad * rad)
                 {
-                    case 0: vx++; break;
-                    case 1: vx--; break;
-                    case 2: vz++; break;
-                    case 3: vz--; break;
-                    case 4: vy++; break;
-                    case 5: vy--; break;
+                    BlockType current = c.GetBlockLocal(xx, yy, zz);
+                    if (current == BlockType.Stone || current == BlockType.Dirt || current == BlockType.Gravel || current == BlockType.Sand || current == BlockType.Clay)
+                    {
+                        if (yy < 8) c.SetBlockLocal(xx, yy, zz, BlockType.Water);
+                        else c.SetBlockLocal(xx, yy, zz, BlockType.Air);
+                    }
                 }
             }
         }
     }
 
-    // -----------------------
-    // TREES (mint eddig, csak top közép leaf)
-    // és a "nagy fa": 1 vastag törzs + feljebb ágak
-    // -----------------------
-    private static void GenerateTreesLikeBeforeButTopLeaf(Chunk c)
+    static void GenerateOres(Chunk c, VoxelWorld w)
     {
-        var w = c.World;
-
-        for (int x = TreeEdgePadding; x < VoxelData.ChunkSize - TreeEdgePadding; x++)
-        {
-            for (int z = TreeEdgePadding; z < VoxelData.ChunkSize - TreeEdgePadding; z++)
-            {
-                int wx = c.Coord.x * VoxelData.ChunkSize + x;
-                int wz = c.Coord.y * VoxelData.ChunkSize + z;
-
-                w.GetBiomeParams(wx, wz, out _, out float rain, out float forest, out float ocean);
-                if (ocean >= w.oceanThreshold) continue;
-
-                int surfaceY = w.GetLandHeight(wx, wz);
-                if (surfaceY <= VoxelWorld.SeaLevel + 1) continue;
-                if (surfaceY < 1 || surfaceY >= VoxelData.ChunkHeight - 12) continue;
-
-                if (c.GetBlockLocal(x, surfaceY, z) != BlockType.Grass) continue;
-                if (c.GetBlockLocal(x, surfaceY + 1, z) != BlockType.Air) continue;
-
-                bool isForest = forest > 0.50f;
-                float humidityFactor = Mathf.Lerp(0.70f, 1.25f, rain);
-                float chance = isForest ? (0.090f * humidityFactor) : (0.010f * humidityFactor);
-
-                int h = w.Hash3(wx, surfaceY, wz);
-                float r01 = (Mathf.Abs(h) % 10000) / 10000f;
-                if (r01 > chance) continue;
-
-                float bigChance = isForest ? 0.14f : 0.04f;
-                float r02 = (Mathf.Abs(w.Hash3(wx + 17, surfaceY + 3, wz - 9)) % 10000) / 10000f;
-                bool big = r02 < bigChance;
-
-                if (big)
-                    TryPlaceBigOakSingleTrunkWithBranches(c, x, surfaceY, z, wx, wz);
-                else
-                    TryPlaceSmallOakLikeBeforeTopLeaf(c, x, surfaceY, z, wx, wz);
-            }
-        }
-    }
-
-    private static bool TryPlaceSmallOakLikeBeforeTopLeaf(Chunk c, int x, int surfaceY, int z, int wx, int wz)
-    {
-        var w = c.World;
-
-        int trunkH = 4 + (Mathf.Abs(w.Hash3(wx, surfaceY, wz)) % 3); // 4..6
-        int topLogY = surfaceY + trunkH - 1;  // idáig log
-        int topLeafY = surfaceY + trunkH;     // legfelül közép LEAF
-
-        if (topLeafY + 2 >= VoxelData.ChunkHeight) return false;
-
-        // hely
-        for (int y = surfaceY + 1; y <= topLeafY; y++)
-            if (c.GetBlockLocal(x, y, z) != BlockType.Air) return false;
-
-        // törzs
-        for (int y = surfaceY + 1; y <= topLogY; y++)
-            c.SetBlockLocal(x, y, z, BlockType.Log);
-
-        // levelek rétegek (mint a régi kód “square” stílusa)
-        PlaceLeavesSquare(c, x, z, topLeafY - 1, 2, false);
-        PlaceLeavesSquare(c, x, z, topLeafY, 2, true);
-        PlaceLeavesSquare(c, x, z, topLeafY + 1, 1, true);
-        PlaceLeavesCross(c, x, z, topLeafY + 2);
-
-        // FIX: legfelső közép mindig LEAF
-        if (c.GetBlockLocal(x, topLeafY, z) == BlockType.Air)
-            c.SetBlockLocal(x, topLeafY, z, BlockType.Leaves);
-
-        return true;
-    }
-
-    private static bool TryPlaceBigOakSingleTrunkWithBranches(Chunk c, int x, int surfaceY, int z, int wx, int wz)
-    {
-        var w = c.World;
-
-        int trunkH = 8 + (Mathf.Abs(w.Hash3(wx, surfaceY, wz)) % 5); // 8..12
-        int topLogY = surfaceY + trunkH - 2; // NE legyen a teteje log
-        int topLeafY = surfaceY + trunkH;    // legfelül leaf
-
-        if (topLeafY + 3 >= VoxelData.ChunkHeight) return false;
-
-        // hely (törzs)
-        for (int y = surfaceY + 1; y <= topLeafY; y++)
-            if (c.GetBlockLocal(x, y, z) != BlockType.Air) return false;
-
-        // törzs
-        for (int y = surfaceY + 1; y <= topLogY; y++)
-            c.SetBlockLocal(x, y, z, BlockType.Log);
-
-        // lombkorona (minecraftosabb: nagyobb rétegek fent)
-        PlaceLeavesSquare(c, x, z, topLeafY - 3, 3, false);
-        PlaceLeavesSquare(c, x, z, topLeafY - 2, 3, true);
-        PlaceLeavesSquare(c, x, z, topLeafY - 1, 2, true);
-        PlaceLeavesSquare(c, x, z, topLeafY, 2, true);
-        PlaceLeavesSquare(c, x, z, topLeafY + 1, 1, true);
-        PlaceLeavesCross(c, x, z, topLeafY + 2);
-
-        // FIX: legfelső közép mindig LEAF
-        if (c.GetBlockLocal(x, topLeafY, z) == BlockType.Air)
-            c.SetBlockLocal(x, topLeafY, z, BlockType.Leaves);
-
-        // ágak: 1 vastag törzs marad, de feljebb oldalsó logok
-        int seed = w.Hash3(wx + 123, surfaceY + 77, wz - 55);
+        int seed = w.Hash3(c.Coord.x, 71003, c.Coord.y);
         System.Random rng = new System.Random(seed);
 
-        int branches = 2 + rng.Next(0, 3);
-        for (int i = 0; i < branches; i++)
-        {
-            int by = topLeafY - 2 - rng.Next(0, 3);
-            int dir = rng.Next(0, 4);
-            int dx = (dir == 0) ? 1 : (dir == 1) ? -1 : 0;
-            int dz = (dir == 2) ? 1 : (dir == 3) ? -1 : 0;
-            int len = 2 + rng.Next(0, 3);
-
-            int ax = x;
-            int az = z;
-
-            for (int s = 0; s < len; s++)
-            {
-                ax += dx;
-                az += dz;
-                if (ax < 1 || ax >= VoxelData.ChunkSize - 1) break;
-                if (az < 1 || az >= VoxelData.ChunkSize - 1) break;
-                if (by < 1 || by >= VoxelData.ChunkHeight - 1) break;
-
-                if (c.GetBlockLocal(ax, by, az) == BlockType.Air)
-                    c.SetBlockLocal(ax, by, az, BlockType.Log);
-
-                PlaceLeavesSquare(c, ax, az, by + 1, 1, true);
-                if (c.GetBlockLocal(ax, by + 2, az) == BlockType.Air)
-                    c.SetBlockLocal(ax, by + 2, az, BlockType.Leaves);
-            }
-        }
-
-        return true;
+        SpawnOreVeins(c, rng, BlockType.CoalOre, 16, 14, 0, 127);
+        SpawnOreVeins(c, rng, BlockType.IronOre, 14, 8, 0, 60);
+        SpawnOreVeins(c, rng, BlockType.GoldOre, 4, 8, 0, 30);
+        SpawnOreVeins(c, rng, BlockType.RedstoneOre, 8, 7, 0, 15);
+        SpawnOreVeins(c, rng, BlockType.DiamondOre, 2, 7, 0, 14);
+        SpawnOreVeins(c, rng, BlockType.LapisOre, 2, 6, 0, 30);
+        SpawnOreVeins(c, rng, BlockType.Gravel, 8, 18, 0, 127);
+        SpawnOreVeins(c, rng, BlockType.Dirt, 12, 22, 0, 127);
     }
 
-    private static void PlaceLeavesSquare(Chunk c, int cx, int cz, int y, int r, bool allowCorners)
+    static void SpawnOreVeins(Chunk c, System.Random rng, BlockType ore, int attempts, int size, int yMin, int yMax)
     {
-        if (y < 0 || y >= VoxelData.ChunkHeight) return;
+        for (int i = 0; i < attempts; i++)
+        {
+            int x = rng.Next(0, 16);
+            int z = rng.Next(0, 16);
+            int y = rng.Next(yMin, yMax + 1);
 
+            float angle = (float)rng.NextDouble() * Mathf.PI;
+            float dx = Mathf.Sin(angle);
+            float dz = Mathf.Cos(angle);
+
+            float len = size / 8f;
+            
+            for(int s=0; s<size; s++) {
+                float t = s / (float)size;
+                int bx = Mathf.RoundToInt(x + dx * t * len);
+                int bz = Mathf.RoundToInt(z + dz * t * len);
+                // JAVÍTÁS: (float) castolás a double kifejezésre
+                int by = Mathf.RoundToInt((float)(y + (rng.NextDouble()-0.5)*2)); 
+
+                if (c.GetBlockLocal(bx, by, bz) == BlockType.Stone)
+                {
+                     c.SetBlockLocal(bx, by, bz, ore);
+                }
+            }
+        }
+    }
+
+    static void GenerateClayPatches(Chunk c, VoxelWorld w)
+    {
+        int seed = w.Hash3(c.Coord.x, 88001, c.Coord.y);
+        System.Random rng = new System.Random(seed);
+
+        for (int i = 0; i < 4; i++)
+        {
+            int x = rng.Next(0, 16);
+            int z = rng.Next(0, 16);
+            int wx = c.Coord.x * 16 + x;
+            int wz = c.Coord.y * 16 + z;
+
+            int h = w.GetLandHeight(wx, wz);
+            if (h > VoxelWorld.SeaLevel - 1) continue;
+
+            int y = Mathf.Clamp(h, 2, VoxelWorld.SeaLevel);
+            BlockType baseT = c.GetBlockLocal(x, y, z);
+            
+            if (baseT == BlockType.Dirt || baseT == BlockType.Gravel || baseT == BlockType.Sand)
+            {
+                c.SetBlockLocal(x, y, z, BlockType.Clay);
+                if (rng.Next(2) == 0) c.SetBlockLocal(x+1, y, z, BlockType.Clay);
+                if (rng.Next(2) == 0) c.SetBlockLocal(x-1, y, z, BlockType.Clay);
+                if (rng.Next(2) == 0) c.SetBlockLocal(x, y, z+1, BlockType.Clay);
+                if (rng.Next(2) == 0) c.SetBlockLocal(x, y, z-1, BlockType.Clay);
+            }
+        }
+    }
+
+    static void GenerateSurfaceFloraAndTrees(Chunk c, VoxelWorld w)
+    {
+        int baseX = c.Coord.x * 16;
+        int baseZ = c.Coord.y * 16;
+
+        for (int x = 2; x < 14; x++)
+        for (int z = 2; z < 14; z++)
+        {
+            int wx = baseX + x;
+            int wz = baseZ + z;
+
+            int y = w.GetLandHeight(wx, wz);
+            if (y <= VoxelWorld.SeaLevel || y >= 126) continue;
+
+            BlockType ground = c.GetBlockLocal(x, y, z);
+            var b = w.GetBiome(wx, wz);
+
+            if (ground == BlockType.Grass)
+            {
+                if (HasNearbyLog(c, x, y + 1, z, 3)) continue;
+
+                if (b == VoxelWorld.BiomeId.Forest)
+                {
+                    if (w.RandomChance(wx, y, wz, 22, 1)) PlaceOakCustom(c, x, y, z, w, rngForTree(wx, y, wz));
+                }
+                else if (b == VoxelWorld.BiomeId.BirchForest)
+                {
+                    if (w.RandomChance(wx, y, wz, 18, 1)) PlaceBirchCustom(c, x, y, z, w, rngForTree(wx, y, wz));
+                }
+                else if (b == VoxelWorld.BiomeId.Taiga)
+                {
+                    if (w.RandomChance(wx, y, wz, 18, 1)) PlaceSpruce(c, x, y, z, w);
+                }
+                else if (b == VoxelWorld.BiomeId.Jungle)
+                {
+                    if (w.RandomChance(wx, y, wz, 12, 1)) PlaceJungle(c, x, y, z, w);
+                }
+                else if (b == VoxelWorld.BiomeId.Savanna)
+                {
+                    if (w.RandomChance(wx, y, wz, 20, 1)) PlaceAcacia(c, x, y, z, w);
+                }
+                else
+                {
+                    if (w.RandomChance(wx, y, wz, 70, 1))
+                    {
+                        if (w.RandomChance(wx, y, wz, 10, 1)) PlaceBigOakCustom(c, x, y, z, w, rngForTree(wx, y, wz));
+                        else PlaceOakCustom(c, x, y, z, w, rngForTree(wx, y, wz));
+                    }
+                }
+            }
+            else if (ground == BlockType.Sand)
+            {
+                if (b == VoxelWorld.BiomeId.Desert)
+                {
+                    if (w.RandomChance(wx, y, wz, 22, 1)) PlaceCactus(c, x, y, z, w);
+                    else if (w.RandomChance(wx, y, wz, 16, 1)) c.SetBlockLocal(x, y + 1, z, BlockType.DeadBush);
+                }
+            }
+        }
+    }
+
+    static System.Random rngForTree(int x, int y, int z) => new System.Random(x * 10000 + y * 100 + z);
+
+    static void PlaceOakCustom(Chunk c, int x, int y, int z, VoxelWorld w, System.Random rng)
+    {
+        int h = 5 + rng.Next(0, 3);
+        
+        for (int i = 1; i <= h; i++) SetL(c, x, y + i, z, BlockType.OakLog);
+
+        int leavesStart = h - 2;
+        
+        for (int ly = leavesStart; ly <= h + 1; ly++)
+        {
+            int relY = ly - leavesStart; 
+            
+            if (relY == 0 || relY == 1) 
+            {
+                for (int lx = -2; lx <= 2; lx++)
+                for (int lz = -2; lz <= 2; lz++)
+                {
+                    if (Mathf.Abs(lx) == 2 && Mathf.Abs(lz) == 2)
+                    {
+                        if (rng.Next(0, 2) == 0) continue;
+                    }
+                    if (lx == 0 && lz == 0) continue; 
+                    SetL(c, x + lx, y + ly + 1, z + lz, BlockType.OakLeaves);
+                }
+            }
+            else if (relY == 2) 
+            {
+                for (int lx = -1; lx <= 1; lx++)
+                for (int lz = -1; lz <= 1; lz++)
+                {
+                    if (Mathf.Abs(lx) == 1 && Mathf.Abs(lz) == 1)
+                    {
+                        if (rng.Next(0, 2) == 0) continue;
+                    }
+                    if (lx == 0 && lz == 0) continue;
+                    SetL(c, x + lx, y + ly + 1, z + lz, BlockType.OakLeaves);
+                }
+            }
+            else 
+            {
+                SetL(c, x, y + ly + 1, z, BlockType.OakLeaves);
+                SetL(c, x + 1, y + ly + 1, z, BlockType.OakLeaves);
+                SetL(c, x - 1, y + ly + 1, z, BlockType.OakLeaves);
+                SetL(c, x, y + ly + 1, z + 1, BlockType.OakLeaves);
+                SetL(c, x, y + ly + 1, z - 1, BlockType.OakLeaves);
+            }
+        }
+    }
+
+    static void PlaceBirchCustom(Chunk c, int x, int y, int z, VoxelWorld w, System.Random rng)
+    {
+        int h = 5 + rng.Next(0, 3);
+        
+        for (int i = 1; i <= h; i++) SetL(c, x, y + i, z, BlockType.BirchLog);
+
+        int leavesStart = h - 2;
+        
+        for (int ly = leavesStart; ly <= h + 1; ly++)
+        {
+            int relY = ly - leavesStart; 
+            
+            if (relY == 0 || relY == 1) 
+            {
+                for (int lx = -2; lx <= 2; lx++)
+                for (int lz = -2; lz <= 2; lz++)
+                {
+                    if (Mathf.Abs(lx) == 2 && Mathf.Abs(lz) == 2)
+                    {
+                        if (rng.Next(0, 2) == 0) continue;
+                    }
+                    if (lx == 0 && lz == 0) continue;
+                    SetL(c, x + lx, y + ly + 1, z + lz, BlockType.BirchLeaves);
+                }
+            }
+            else if (relY == 2) 
+            {
+                for (int lx = -1; lx <= 1; lx++)
+                for (int lz = -1; lz <= 1; lz++)
+                {
+                    if (Mathf.Abs(lx) == 1 && Mathf.Abs(lz) == 1)
+                    {
+                        if (rng.Next(0, 2) == 0) continue;
+                    }
+                    if (lx == 0 && lz == 0) continue;
+                    SetL(c, x + lx, y + ly + 1, z + lz, BlockType.BirchLeaves);
+                }
+            }
+            else 
+            {
+                SetL(c, x, y + ly + 1, z, BlockType.BirchLeaves);
+                SetL(c, x + 1, y + ly + 1, z, BlockType.BirchLeaves);
+                SetL(c, x - 1, y + ly + 1, z, BlockType.BirchLeaves);
+                SetL(c, x, y + ly + 1, z + 1, BlockType.BirchLeaves);
+                SetL(c, x, y + ly + 1, z - 1, BlockType.BirchLeaves);
+            }
+        }
+    }
+
+    static void PlaceBigOakCustom(Chunk c, int x, int y, int z, VoxelWorld w, System.Random rng)
+    {
+        int h = 8 + rng.Next(0, 7); 
+        for (int i = 1; i <= h; i++) SetL(c, x, y + i, z, BlockType.OakLog);
+
+        int branchCount = 4 + rng.Next(0, 3);
+        for(int k=0; k<branchCount; k++)
+        {
+            int by = y + h - 3 - rng.Next(0, 4);
+            int dirX = rng.Next(-1, 2);
+            int dirZ = rng.Next(-1, 2);
+            if (dirX == 0 && dirZ == 0) dirX = 1;
+
+            int branchLen = 3 + rng.Next(0, 3);
+            for(int b=1; b<=branchLen; b++)
+            {
+                SetL(c, x + dirX*b, by + b/2, z + dirZ*b, BlockType.OakLog);
+            }
+            PlaceLeafBlob(c, x + dirX*branchLen, by + branchLen/2, z + dirZ*branchLen, BlockType.OakLeaves);
+        }
+
+        PlaceLeafBlob(c, x, y + h + 1, z, BlockType.OakLeaves);
+    }
+
+    static bool HasNearbyLog(Chunk c, int x, int y, int z, int r)
+    {
         for (int dx = -r; dx <= r; dx++)
         for (int dz = -r; dz <= r; dz++)
         {
-            if (!allowCorners && Mathf.Abs(dx) == r && Mathf.Abs(dz) == r) continue;
+            int ax = x + dx;
+            int az = z + dz;
+            if (ax < 0 || ax > 15 || az < 0 || az > 15) continue;
+            BlockType t = c.GetBlockLocal(ax, y, az);
+            if (t == BlockType.OakLog || t == BlockType.BirchLog || t == BlockType.SpruceLog || t == BlockType.JungleLog || t == BlockType.AcaciaLog) return true;
+        }
+        return false;
+    }
 
-            int ax = cx + dx;
-            int az = cz + dz;
-            if (ax < 0 || ax >= VoxelData.ChunkSize) continue;
-            if (az < 0 || az >= VoxelData.ChunkSize) continue;
+    static void PlaceSpruce(Chunk c, int x, int y, int z, VoxelWorld w)
+    {
+        int h = 6 + (Mathf.Abs(w.Hash3(x, y, z)) % 4);
+        for (int i = 1; i <= h; i++) if (c.GetBlockLocal(x, y + i, z) == BlockType.Air) c.SetBlockLocal(x, y + i, z, BlockType.SpruceLog);
 
-            if (c.GetBlockLocal(ax, y, az) == BlockType.Air)
-                c.SetBlockLocal(ax, y, az, BlockType.Leaves);
+        int r = 0;
+        for (int ly = h; ly >= 2; ly--)
+        {
+            r = (h - ly) / 2 + 1;
+            if (r > 3) r = 3;
+            if (ly == h) r = 0;
+            else if (ly == h - 1) r = 1;
+
+            for (int lx = x - r; lx <= x + r; lx++)
+            for (int lz = z - r; lz <= z + r; lz++)
+            {
+                if (Mathf.Abs(lx - x) == r && Mathf.Abs(lz - z) == r && r > 1) continue;
+                SetL(c, lx, y + ly + 1, lz, BlockType.SpruceLeaves);
+            }
         }
     }
 
-    private static void PlaceLeavesCross(Chunk c, int cx, int cz, int y)
+    static void PlaceAcacia(Chunk c, int x, int y, int z, VoxelWorld w)
     {
-        if (y < 0 || y >= VoxelData.ChunkHeight) return;
+        int h = 5 + (Mathf.Abs(w.Hash3(x, y, z)) % 3);
+        int dx = (w.Hash3(x, y, z) % 2 == 0) ? 1 : -1;
 
-        int[,] pts = new int[,]
+        for (int i = 1; i <= h; i++)
         {
-            {0,0},{1,0},{-1,0},{0,1},{0,-1}
-        };
-
-        for (int i = 0; i < pts.GetLength(0); i++)
-        {
-            int ax = cx + pts[i, 0];
-            int az = cz + pts[i, 1];
-            if (ax < 0 || ax >= VoxelData.ChunkSize) continue;
-            if (az < 0 || az >= VoxelData.ChunkSize) continue;
-
-            if (c.GetBlockLocal(ax, y, az) == BlockType.Air)
-                c.SetBlockLocal(ax, y, az, BlockType.Leaves);
+            int curX = (i > 3) ? x + dx : x;
+            if (c.GetBlockLocal(curX, y + i, z) == BlockType.Air) c.SetBlockLocal(curX, y + i, z, BlockType.AcaciaLog);
+            if (i == h) PlaceFlatCanopy(c, curX, y + i, z, BlockType.AcaciaLeaves);
         }
     }
 
-    // -----------------------
-    // SHRUBS (marad kb ugyanaz)
-    // -----------------------
-    private static void GenerateShrubs(Chunk c)
+    static void PlaceFlatCanopy(Chunk c, int x, int y, int z, BlockType leaf)
     {
-        var w = c.World;
-
-        int wx0 = c.Coord.x * VoxelData.ChunkSize;
-        int wz0 = c.Coord.y * VoxelData.ChunkSize;
-
-        for (int x = 1; x < VoxelData.ChunkSize - 1; x++)
-        for (int z = 1; z < VoxelData.ChunkSize - 1; z++)
+        for (int lx = x - 2; lx <= x + 2; lx++)
+        for (int lz = z - 2; lz <= z + 2; lz++)
         {
-            int wx = wx0 + x;
-            int wz = wz0 + z;
-
-            w.GetBiomeParams(wx, wz, out _, out float rain, out float forest, out float ocean);
-            if (ocean >= w.oceanThreshold) continue;
-
-            int surfaceY = w.GetLandHeight(wx, wz);
-            if (surfaceY <= VoxelWorld.SeaLevel + 1) continue;
-            if (surfaceY < 1 || surfaceY >= VoxelData.ChunkHeight - 6) continue;
-            if (c.GetBlockLocal(x, surfaceY, z) != BlockType.Grass) continue;
-
-            bool isForest = forest > 0.50f;
-            if (!isForest) continue;
-
-            float patch = Mathf.PerlinNoise((wx + w.settings.seed * 19) * 0.08f, (wz + w.settings.seed * 19) * 0.08f);
-            float density = Mathf.Lerp(0.22f, 0.46f, rain) * Mathf.Lerp(0.65f, 1.25f, patch);
-
-            int h = w.Hash3(wx, surfaceY + 9, wz);
-            float r = (Mathf.Abs(h) % 10000) / 10000f;
-            if (r > density) continue;
-
-            int y1 = surfaceY + 1;
-            if (y1 < 1 || y1 >= VoxelData.ChunkHeight - 1) continue;
-            if (c.GetBlockLocal(x, y1, z) != BlockType.Air) continue;
-
-            int kind = Mathf.Abs(w.Hash3(wx + 3, surfaceY + 1, wz + 7)) % 100;
-
-            if (kind < 70)
-            {
-                c.SetBlockLocal(x, y1, z, BlockType.Leaves);
-                if (kind < 22)
-                {
-                    int y2 = y1 + 1;
-                    if (y2 < VoxelData.ChunkHeight - 1 && c.GetBlockLocal(x, y2, z) == BlockType.Air)
-                        c.SetBlockLocal(x, y2, z, BlockType.Leaves);
-                }
-            }
-            else
-            {
-                c.SetBlockLocal(x, y1, z, BlockType.Log);
-                int y2 = y1 + 1;
-                if (y2 < VoxelData.ChunkHeight - 1 && c.GetBlockLocal(x, y2, z) == BlockType.Air)
-                    c.SetBlockLocal(x, y2, z, BlockType.Leaves);
-
-                PlaceLeavesSquare(c, x, z, y2, 1, true);
-            }
+            if (Mathf.Abs(lx - x) == 2 && Mathf.Abs(lz - z) == 2) continue;
+            SetL(c, lx, y, lz, leaf);
         }
+
+        for (int lx = x - 1; lx <= x + 1; lx++)
+        for (int lz = z - 1; lz <= z + 1; lz++) SetL(c, lx, y + 1, lz, leaf);
+    }
+
+    static void PlaceJungle(Chunk c, int x, int y, int z, VoxelWorld w)
+    {
+        int h = 8 + (Mathf.Abs(w.Hash3(x, y, z)) % 7);
+        for (int i = 1; i <= h; i++) if (c.GetBlockLocal(x, y + i, z) == BlockType.Air) c.SetBlockLocal(x, y + i, z, BlockType.JungleLog);
+        PlaceLeafBlob(c, x, y + h, z, BlockType.JungleLeaves);
+    }
+
+    static void PlaceCactus(Chunk c, int x, int y, int z, VoxelWorld w)
+    {
+        int h = 2 + (Mathf.Abs(w.Hash3(x, y, z)) % 3);
+        for (int i = 1; i <= h; i++)
+        {
+            if (c.GetBlockLocal(x, y + i, z) != BlockType.Air) break;
+            c.SetBlockLocal(x, y + i, z, BlockType.Cactus);
+        }
+    }
+
+    static void PlaceLeafBlob(Chunk c, int x, int y, int z, BlockType leaf)
+    {
+        for (int ly = -1; ly <= 1; ly++)
+        for (int lx = -2; lx <= 2; lx++)
+        for (int lz = -2; lz <= 2; lz++)
+        {
+            if (Mathf.Abs(lx) + Mathf.Abs(ly) + Mathf.Abs(lz) > 3) continue;
+            SetL(c, x + lx, y + ly, z + lz, leaf);
+        }
+    }
+
+    static void SetL(Chunk c, int x, int y, int z, BlockType t)
+    {
+        if (c.GetBlockLocal(x, y, z) == BlockType.Air) c.SetBlockLocal(x, y, z, t);
     }
 }

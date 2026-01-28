@@ -837,10 +837,10 @@ MonoBehaviour:
     savannaGrass: {r: 0.7490196, g: 0.7176471, b: 0.33333334, a: 1}
   settings:
     player: {fileID: 709717491}
-    viewDistanceInChunks: 5
+    viewDistanceInChunks: 15
     useRandomSeed: 1
     seed: 12345
-    biomeOverride: 5
+    biomeOverride: 0
   terrainColliderMaterial: {fileID: 13400000, guid: 6cf2eebc656adab4dbe11164c61a6dba, type: 2}
   minecraftLikeWater: 1
   sandFalls: 1

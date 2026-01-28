@@ -10,614 +10,514 @@ public class VoxelWorld : MonoBehaviour
     {
         public Color plainsGrass = new Color32(0x91, 0xBD, 0x59, 0xFF);
         public Color plainsFoliage = new Color32(0x77, 0xAB, 0x2F, 0xFF);
+        public Color forestGrass = new Color32(0x79, 0xC0, 0x5A, 0xFF);
+        public Color forestFoliage = new Color32(0x59, 0xAE, 0x30, 0xFF);
+        public Color spruceGrass = new Color32(0x81, 0x8D, 0x75, 0xFF);
+        public Color spruceFoliage = new Color32(0x61, 0x99, 0x61, 0xFF);
+        public Color jungleGrass = new Color32(0x59, 0xC9, 0x3C, 0xFF);
+        public Color jungleFoliage = new Color32(0x30, 0xBB, 0x0B, 0xFF);
+        public Color desertGrass = new Color32(0xBF, 0xB7, 0x55, 0xFF);
+        public Color savannaGrass = new Color32(0xBF, 0xB7, 0x55, 0xFF);
     }
 
     [System.Serializable]
     public class BlockMaterials
     {
-        public Material grassTop;
-        public Material grassSide;
-        public Material dirt;
-        public Material stone;
-        public Material sand;
-        public Material water;
-
-        public Material logTop;
-        public Material logSide;
-        public Material leaves;
-
-        public Material bedrock;
-
-        public Material coalOre;
-        public Material ironOre;
-        public Material redstoneOre;
-        public Material lapisOre;
-        public Material diamondOre;
-        public Material emeraldOre;
-
-        public Material goldOre;
+        public Material grassTop, grassSide, dirt, stone, sand, water, bedrock;
+        public Material gravel, clay, cactusTop, cactusSide, cactusBottom, deadBush;
+        public Material coalOre, ironOre, goldOre, redstoneOre, lapisOre, diamondOre, emeraldOre;
+        public Material oakLogTop, oakLogSide, oakLeaves;
+        public Material birchLogTop, birchLogSide, birchLeaves;
+        public Material spruceLogTop, spruceLogSide, spruceLeaves;
+        public Material jungleLogTop, jungleLogSide, jungleLeaves;
+        public Material acaciaLogTop, acaciaLogSide, acaciaLeaves;
     }
 
     [System.Serializable]
     public class WorldSettings
     {
         public Transform player;
-        public int viewDistanceInChunks = 6;
+        public int viewDistanceInChunks = 8;
+        [Header("Generation")]
+        public bool useRandomSeed = false;
         public int seed = 12345;
+        public BiomeOverride biomeOverride = BiomeOverride.None;
     }
+
+    public enum BiomeOverride { None, Plains, Forest, BirchForest, Taiga, Jungle, Desert, Savanna, Ocean }
+    public enum BiomeId { Plains, Forest, BirchForest, Taiga, Jungle, Desert, Savanna, Ocean }
 
     public BlockMaterials materials;
     public BiomeTints biomeTints;
     public WorldSettings settings;
     public PhysicsMaterial terrainColliderMaterial;
 
-    [Header("Terrain")]
-    [Range(0f, 1f)] public float roughness = 0.25f;
-
-    [Header("Water")]
     public bool minecraftLikeWater = true;
-    public float oceanScale = 0.0018f;
-    [Range(0f, 1f)] public float oceanThreshold = 0.52f;
-    public int minWaterDepth = 2;
+    public bool gravityBlocksEnabled = true;
+    public int gravityChecksPerFrame = 64;
 
-    [Header("Rivers")]
-    public bool enableRivers = true;
-    [Tooltip("Lower = longer, smoother rivers")]
-    public float riverScale = 0.00125f;
-    [Tooltip("River half-width in noise-space (smaller = thinner rivers)")]
-    [Range(0.002f, 0.08f)] public float riverWidth = 0.020f;
-    [Tooltip("How deep the river carves into terrain")]
-    [Range(1f, 30f)] public float riverDepth = 11f;
-    [Tooltip("Extra flattening around river banks")]
-    [Range(0f, 1f)] public float riverBankBlend = 0.55f;
-    [Tooltip("Rivers avoid strong oceans when this is > 0")]
-    [Range(0f, 1f)] public float riverOceanAvoid = 0.55f;
+    readonly Dictionary<Vector2Int, Chunk> chunks = new Dictionary<Vector2Int, Chunk>();
+    readonly HashSet<Vector2Int> activeChunkCoords = new HashSet<Vector2Int>();
+    readonly List<Vector2Int> neededChunks = new List<Vector2Int>();
+    
+    readonly Queue<Vector3Int> gravityQueue = new Queue<Vector3Int>();
+    readonly HashSet<Vector3Int> gravityQueuedSet = new HashSet<Vector3Int>();
 
-    [Header("Soil")]
-    public int topSoilDepth = 4;
+    int worldSeed;
+    FastNoise noise;
 
-    [Header("Caves (banya)")]
-    public bool enableCaves = true;
-    public float caveScale = 0.045f;
-    [Range(0.0f, 1f)] public float caveThreshold = 0.78f;
-    public int caveMinDepthBelowSurface = 6;
-
-    [Header("Caves (better)")]
-    [Tooltip("Spaghetti caves: lower = longer tunnels")]
-    public float caveSpaghettiScale = 0.020f;
-    [Range(0.0f, 1f)] public float caveSpaghettiThreshold = 0.62f;
-    [Tooltip("Big caverns: lower = bigger blobs")]
-    public float caveCavernScale = 0.010f;
-    [Range(0.0f, 1f)] public float caveCavernThreshold = 0.74f;
-
-    [Header("Sand Physics")]
-    public bool sandFalls = true;
-    public int sandChecksPerFrame = 64;
-    public float fallingSandSpawnYOffset = 0.15f;
-    public float fallingSandLinearDrag = 0.05f;
-    public float fallingSandAngularDrag = 0.05f;
-
-    const int ChunkCreateBudgetPerFrame = 2;
-
-    const float BiomeTempScale = 0.0017f;
-    const float BiomeRainScale = 0.0017f;
-    const float BiomeForestScale = 0.0014f;
-
-    private readonly Dictionary<Vector2Int, Chunk> chunks = new Dictionary<Vector2Int, Chunk>();
-    private readonly HashSet<Vector2Int> activeChunkCoords = new HashSet<Vector2Int>();
-    private readonly List<Vector2Int> neededChunks = new List<Vector2Int>(2048);
-
-    private readonly Queue<Vector3Int> sandQueue = new Queue<Vector3Int>(4096);
-    private readonly HashSet<Vector3Int> sandQueued = new HashSet<Vector3Int>();
-
-    private enum BiomeId
+    void Awake()
     {
-        Plains
+        if (settings.useRandomSeed) settings.seed = Random.Range(-100000, 100000);
+        worldSeed = settings.seed;
+        if (biomeTints == null) biomeTints = new BiomeTints();
+        noise = new FastNoise(worldSeed);
+        Random.InitState(worldSeed);
     }
 
-    private void Awake()
+    void Start() { UpdateWorld(true); }
+    void Update() { UpdateWorld(false); TickGravityBlocks(); }
+
+    public Vector2Int WorldToChunkCoord(Vector3 p) => new Vector2Int(Mathf.FloorToInt(p.x / 16f), Mathf.FloorToInt(p.z / 16f));
+
+    void UpdateWorld(bool force)
     {
-        Random.InitState(settings.seed);
-        if (biomeTints == null) biomeTints = new BiomeTints();
+        if (settings.player == null) return;
+
+        Vector2Int pChunk = WorldToChunkCoord(settings.player.position);
+        activeChunkCoords.Clear();
+        neededChunks.Clear();
+
+        int r = settings.viewDistanceInChunks;
+        for (int dx = -r; dx <= r; dx++)
+        for (int dz = -r; dz <= r; dz++)
+        {
+            Vector2Int c = new Vector2Int(pChunk.x + dx, pChunk.y + dz);
+            activeChunkCoords.Add(c);
+            if (!chunks.ContainsKey(c)) neededChunks.Add(c);
+        }
+
+        neededChunks.Sort((a, b) => Vector2Int.Distance(a, pChunk).CompareTo(Vector2Int.Distance(b, pChunk)));
+        int budget = force ? neededChunks.Count : 4;
+        for (int i = 0; i < Mathf.Min(budget, neededChunks.Count); i++) CreateChunk(neededChunks[i]);
+
+        foreach (var kv in chunks) kv.Value.SetActive(activeChunkCoords.Contains(kv.Key));
+    }
+
+    void CreateChunk(Vector2Int c)
+    {
+        GameObject go = new GameObject($"Chunk_{c.x}_{c.y}");
+        go.transform.parent = transform;
+        go.transform.position = new Vector3(c.x * 16, 0, c.y * 16);
+        Chunk ch = go.AddComponent<Chunk>();
+        ch.Init(this, c, materials);
+        chunks.Add(c, ch);
+    }
+
+    public BiomeId GetBiome(int x, int z)
+    {
+        if (settings.biomeOverride != BiomeOverride.None) return (BiomeId)((int)settings.biomeOverride - 1);
+
+        float cont = Continentalness(x, z);
+        if (cont < -0.35f) return BiomeId.Ocean;
+
+        float temp = FBM2(x * 0.00125f, z * 0.00125f, 4, 0.52f, 2.0f, 1007);
+        float humid = FBM2(x * 0.00125f, z * 0.00125f, 4, 0.50f, 2.05f, 2009);
+
+        temp = Mathf.Clamp01(temp * 0.5f + 0.5f);
+        humid = Mathf.Clamp01(humid * 0.5f + 0.5f);
+
+        float hot = Mathf.SmoothStep(0.0f, 1.0f, temp);
+        float wet = Mathf.SmoothStep(0.0f, 1.0f, humid);
+
+        if (hot > 0.78f && wet < 0.35f) return BiomeId.Desert;
+        if (hot > 0.72f && wet < 0.55f) return BiomeId.Savanna;
+        if (hot > 0.68f && wet > 0.70f) return BiomeId.Jungle;
+        if (hot < 0.28f) return BiomeId.Taiga;
+        if (wet > 0.62f) return BiomeId.Forest;
+        if (wet > 0.48f && hot > 0.42f) return BiomeId.BirchForest;
+        return BiomeId.Plains;
     }
 
     public void GetBiomeTintsAt(int worldX, int worldZ, out Color grass, out Color foliage)
     {
-        BiomeId biome = BiomeId.Plains;
-        switch (biome)
+        BiomeId b = GetBiome(worldX, worldZ);
+        grass = biomeTints.plainsGrass;
+        foliage = biomeTints.plainsFoliage;
+        switch (b)
         {
-            default:
-                grass = biomeTints.plainsGrass;
-                foliage = biomeTints.plainsFoliage;
-                break;
+            case BiomeId.Forest: grass = biomeTints.forestGrass; foliage = biomeTints.forestFoliage; break;
+            case BiomeId.BirchForest: grass = biomeTints.forestGrass; foliage = biomeTints.forestFoliage; break;
+            case BiomeId.Taiga: grass = biomeTints.spruceGrass; foliage = biomeTints.spruceFoliage; break;
+            case BiomeId.Jungle: grass = biomeTints.jungleGrass; foliage = biomeTints.jungleFoliage; break;
+            case BiomeId.Desert: grass = biomeTints.desertGrass; foliage = biomeTints.desertGrass; break;
+            case BiomeId.Savanna: grass = biomeTints.savannaGrass; foliage = biomeTints.savannaGrass; break;
         }
     }
 
-    private void Start()
+    float Continentalness(int x, int z)
     {
-        UpdateWorld(true);
+        float cont = FBM2(x * 0.0018f, z * 0.0018f, 4, 0.52f, 2.0f, 14011);
+        float cont2 = FBM2(x * 0.0009f, z * 0.0009f, 3, 0.55f, 2.0f, 15011);
+        float c = (cont * 0.75f + cont2 * 0.25f);
+        return Mathf.Clamp(c, -1f, 1f);
+    }
 
-        if (settings.player != null)
+    public int GetLandHeight(int x, int z)
+    {
+        float cont = Continentalness(x, z);
+
+        float baseN = FBM2(x * 0.0030f, z * 0.0030f, 5, 0.50f, 2.0f, 3001);
+        float detail = FBM2(x * 0.0120f, z * 0.0120f, 3, 0.50f, 2.1f, 4001);
+
+        float baseHeight = SeaLevel + 6;
+        float inland = Mathf.Clamp01((cont + 0.35f) / 1.35f);
+        float inlandPow = inland * inland;
+
+        float hills = baseN * 18f + detail * 4f;
+        float plateaus = FBM2(x * 0.0018f, z * 0.0018f, 4, 0.52f, 2.0f, 5001) * 10f;
+
+        float h = baseHeight + inlandPow * (hills + plateaus) + cont * 28f;
+
+        if (cont < -0.35f)
         {
-            var pc = settings.player.GetComponent<PlayerController>();
-            if (pc != null) pc.PlaceAboveGround(new Vector3(0.5f, 0f, 0.5f), 300f, 0.2f);
+            float t = Mathf.InverseLerp(-0.35f, -0.75f, cont);
+            float oceanFloor = Mathf.Lerp(SeaLevel - 6, 18f, t * t);
+            float floorVar = FBM2(x * 0.020f, z * 0.020f, 2, 0.55f, 2.0f, 6001) * 4f;
+            h = oceanFloor + floorVar;
+        }
+
+        int ih = Mathf.Clamp(Mathf.RoundToInt(h), 4, 126);
+
+        float river = Mathf.Abs(FBM2(x * 0.004f, z * 0.004f, 3, 0.5f, 2.0f, 7001));
+        float riverMask = Mathf.SmoothStep(0.04f, 0.00f, river);
+        if (cont > -0.25f)
+        {
+            float target = SeaLevel + 1;
+            ih = Mathf.RoundToInt(Mathf.Lerp(ih, target, riverMask * 0.65f));
+            ih = Mathf.Clamp(ih, 4, 126);
+        }
+
+        return ih;
+    }
+
+    public void GenerateColumn(int x, int z, BlockType[] col)
+    {
+        int h = GetLandHeight(x, z);
+        BiomeId biome = GetBiome(x, z);
+
+        bool beachZone = h >= SeaLevel - 2 && h <= SeaLevel + 2 && biome != BiomeId.Ocean;
+        float beachN = FBM2(x * 0.02f, z * 0.02f, 2, 0.5f, 2.0f, 8001);
+        bool sandBeach = beachZone && beachN > 0.10f;
+        bool gravelBeach = beachZone && !sandBeach && beachN > -0.10f;
+
+        int fillDepth = 4;
+        int stoneStart = Mathf.Max(1, h - fillDepth);
+
+        float bedNoise = noise.Noise2(x * 0.1f, z * 0.1f, 9500);
+
+        for (int y = 0; y < VoxelData.ChunkHeight; y++)
+        {
+            BlockType t;
+
+            if (y == 0) t = BedrockAt(x, y, z);
+            else if (y > h) t = (y <= SeaLevel) ? BlockType.Water : BlockType.Air;
             else
             {
-                int h = GetLandHeight(0, 0);
-                settings.player.position = new Vector3(0.5f, h + 3f, 0.5f);
-            }
-        }
-
-        UpdateWorld(true);
-    }
-
-    private void Update()
-    {
-        UpdateWorld(false);
-        TickSand();
-    }
-
-    private void UpdateWorld(bool force)
-    {
-        if (settings.player == null) return;
-
-        Vector2Int playerChunk = WorldToChunkCoord(settings.player.position);
-
-        activeChunkCoords.Clear();
-        neededChunks.Clear();
-
-        int r = Mathf.Max(1, settings.viewDistanceInChunks);
-        for (int dx = -r; dx <= r; dx++)
-        {
-            for (int dz = -r; dz <= r; dz++)
-            {
-                Vector2Int c = new Vector2Int(playerChunk.x + dx, playerChunk.y + dz);
-                activeChunkCoords.Add(c);
-                if (!chunks.ContainsKey(c)) neededChunks.Add(c);
-            }
-        }
-
-        neededChunks.Sort((a, b) =>
-        {
-            int da = (a.x - playerChunk.x) * (a.x - playerChunk.x) + (a.y - playerChunk.y) * (a.y - playerChunk.y);
-            int db = (b.x - playerChunk.x) * (b.x - playerChunk.x) + (b.y - playerChunk.y) * (b.y - playerChunk.y);
-            return da.CompareTo(db);
-        });
-
-        int budget = force ? neededChunks.Count : ChunkCreateBudgetPerFrame;
-        for (int i = 0; i < neededChunks.Count && i < budget; i++)
-            CreateChunk(neededChunks[i]);
-
-        foreach (var kv in chunks)
-        {
-            bool shouldBeActive = activeChunkCoords.Contains(kv.Key);
-            kv.Value.SetActive(shouldBeActive);
-        }
-    }
-
-    private void CreateChunk(Vector2Int coord)
-    {
-        if (chunks.ContainsKey(coord)) return;
-
-        GameObject go = new GameObject($"Chunk_{coord.x}_{coord.y}");
-        go.transform.parent = transform;
-        go.transform.position = new Vector3(coord.x * VoxelData.ChunkSize, 0, coord.y * VoxelData.ChunkSize);
-
-        Chunk chunk = go.AddComponent<Chunk>();
-        chunk.Init(this, coord, materials);
-
-        chunks.Add(coord, chunk);
-
-        RebuildChunkIfExists(new Vector2Int(coord.x - 1, coord.y));
-        RebuildChunkIfExists(new Vector2Int(coord.x + 1, coord.y));
-        RebuildChunkIfExists(new Vector2Int(coord.x, coord.y - 1));
-        RebuildChunkIfExists(new Vector2Int(coord.x, coord.y + 1));
-    }
-
-    public Vector2Int WorldToChunkCoord(Vector3 worldPos)
-    {
-        int cx = Mathf.FloorToInt(worldPos.x / VoxelData.ChunkSize);
-        int cz = Mathf.FloorToInt(worldPos.z / VoxelData.ChunkSize);
-        return new Vector2Int(cx, cz);
-    }
-
-    public void GetBiomeParams(int worldX, int worldZ, out float temp, out float rain, out float forest, out float ocean)
-    {
-        int s = settings.seed;
-
-        temp = Mathf.PerlinNoise((worldX + s * 11) * BiomeTempScale, (worldZ + s * 11) * BiomeTempScale);
-        rain = Mathf.PerlinNoise((worldX + s * 23) * BiomeRainScale, (worldZ + s * 23) * BiomeRainScale);
-
-        forest = Mathf.PerlinNoise((worldX + s * 37) * BiomeForestScale, (worldZ + s * 37) * BiomeForestScale);
-
-        ocean = Mathf.PerlinNoise((worldX + s * 101) * oceanScale, (worldZ + s * 101) * oceanScale);
-    }
-
-    // =========================
-    // Terrain generation
-    // =========================
-
-    float RiverDistance01(int worldX, int worldZ)
-    {
-        // 0 = center line, 1 = far away
-        int s = settings.seed;
-
-        // Cheap domain warp to avoid repetitive parallel bands
-        float wx = worldX + (Mathf.PerlinNoise((worldX + s * 311) * 0.0025f, (worldZ + s * 733) * 0.0025f) - 0.5f) * 220f;
-        float wz = worldZ + (Mathf.PerlinNoise((worldX + s * 911) * 0.0025f, (worldZ + s * 199) * 0.0025f) - 0.5f) * 220f;
-
-        float n = Mathf.PerlinNoise((wx + s * 61) * riverScale, (wz + s * 61) * riverScale);
-        float dist = Mathf.Abs(n - 0.5f) * 2f; // 0..1
-        return Mathf.Clamp01(dist);
-    }
-
-    float RiverMask01(int worldX, int worldZ, float ocean)
-    {
-        if (!minecraftLikeWater || !enableRivers) return 0f;
-
-        // Avoid placing rivers deep into oceans (but still allow them to meet the sea)
-        float avoid = Mathf.InverseLerp(oceanThreshold, 1f, ocean);
-        if (avoid > riverOceanAvoid) return 0f;
-
-        float dist = RiverDistance01(worldX, worldZ);
-        // Convert width into a distance threshold
-        float width = Mathf.Clamp(riverWidth, 0.002f, 0.12f);
-        float m = Mathf.InverseLerp(width, 0f, dist);
-
-        // Sharpen a bit so we have a defined channel
-        m = m * m;
-        return Mathf.Clamp01(m);
-    }
-
-    public int GetLandHeight(int worldX, int worldZ)
-    {
-        float baseScale = Mathf.Lerp(0.0018f, 0.0105f, roughness);
-        float persistence = Mathf.Lerp(0.35f, 0.55f, roughness);
-        float lacunarity = 2.0f;
-
-        float h = 0f;
-        float amp = 1f;
-        float freq = 1f;
-
-        int s = settings.seed;
-        for (int i = 0; i < 4; i++)
-        {
-            float nx = (worldX + s * 17) * baseScale * freq;
-            float nz = (worldZ + s * 17) * baseScale * freq;
-            float n = Mathf.PerlinNoise(nx, nz) - 0.5f;
-            h += n * amp;
-
-            amp *= persistence;
-            freq *= lacunarity;
-        }
-
-        GetBiomeParams(worldX, worldZ, out _, out _, out _, out float ocean);
-
-        // Continents: pull down land where ocean noise is strong
-        float continental = Mathf.Lerp(0.0f, -0.55f, Mathf.InverseLerp(oceanThreshold, 1.0f, ocean));
-        h += continental;
-
-        int height = SeaLevel + 6 + Mathf.RoundToInt(h * 60f);
-        height = Mathf.Clamp(height, 2, VoxelData.ChunkHeight - 2);
-
-        // Rivers carve the terrain (even inland). Minecraft rivers are around sea level.
-        float riverMask = RiverMask01(worldX, worldZ, ocean);
-        if (riverMask > 0f)
-        {
-            float carve = riverMask;
-            carve = Mathf.Lerp(carve, 1f, riverBankBlend * carve); // wider banks
-
-            int carved = height - Mathf.RoundToInt(riverDepth * carve);
-            // Keep river channel close to sea level; allow small variation.
-            carved = Mathf.Min(carved, SeaLevel - 1);
-            height = Mathf.Clamp(carved, 2, VoxelData.ChunkHeight - 2);
-        }
-
-        // Keep inland from dipping too far below sea (prevents endless inland oceans)
-        if (minecraftLikeWater && ocean < oceanThreshold)
-        {
-            if (height < SeaLevel - 1) height = SeaLevel - 1;
-        }
-
-        return height;
-    }
-
-    // =========================
-    // Cave generation (improved)
-    // =========================
-
-    float Noise3Cheap(float x, float y, float z)
-    {
-        // Unity has only 2D Perlin; combine 3 planes to get a usable 3D-ish noise.
-        float a = Mathf.PerlinNoise(x, z);
-        float b = Mathf.PerlinNoise(x, y);
-        float c = Mathf.PerlinNoise(z, y);
-        return (a + b + c) / 3f;
-    }
-
-    float Ridged01(float n01)
-    {
-        // 0.5 peak, 0/1 valleys
-        float r = 1f - Mathf.Abs(n01 * 2f - 1f);
-        return Mathf.Clamp01(r);
-    }
-
-    bool IsCave(int worldX, int worldY, int worldZ, int surfaceY)
-    {
-        if (!enableCaves) return false;
-        if (worldY <= 5) return false;
-        if (worldY >= surfaceY - caveMinDepthBelowSurface) return false;
-
-        int s = settings.seed;
-
-        // Depth: more caves deeper down (Minecraft-like)
-        float depth01 = Mathf.InverseLerp(surfaceY, 0, worldY);
-        float depthBoost = Mathf.Lerp(0.00f, 0.12f, depth01);
-
-        // Spaghetti (ridged) tunnels
-        float sx = (worldX + s * 73) * caveSpaghettiScale;
-        float sy = (worldY + s * 97) * caveSpaghettiScale;
-        float sz = (worldZ + s * 53) * caveSpaghettiScale;
-
-        float nS = Noise3Cheap(sx, sy, sz);
-        float ridged = Ridged01(nS);
-
-        // Larger caverns (blobs)
-        float cx = (worldX + s * 147) * caveCavernScale;
-        float cy = (worldY + s * 191) * caveCavernScale;
-        float cz = (worldZ + s * 171) * caveCavernScale;
-        float nC = Noise3Cheap(cx, cy, cz);
-
-        // Original style as a small contribution (keeps variety)
-        float ax = (worldX + s * 13) * caveScale;
-        float ay = (worldY + s * 29) * caveScale;
-        float az = (worldZ + s * 41) * caveScale;
-        float nO = Noise3Cheap(ax, ay, az);
-
-        // Mix and threshold
-        float v = Mathf.Lerp(ridged, nO, 0.25f);
-        bool spaghetti = v > (caveSpaghettiThreshold - depthBoost);
-        bool cavern = nC > (caveCavernThreshold - depthBoost * 0.5f);
-
-        return spaghetti || cavern;
-    }
-
-    // =========================
-    // Block sampling (terrain)
-    // =========================
-
-    public void GetOreSettings(out OreSettings o)
-    {
-        o = new OreSettings
-        {
-            coal = new OreLayer(countPerChunk: 20, veinSize: 17, yMin: 0, yMax: 127),
-            iron = new OreLayer(countPerChunk: 20, veinSize: 9, yMin: 0, yMax: 63),
-            gold = new OreLayer(countPerChunk: 9, veinSize: 9, yMin: 0, yMax: 31),
-            redstone = new OreLayer(countPerChunk: 8, veinSize: 7, yMin: 0, yMax: 15),
-            diamond = new OreLayer(countPerChunk: 1, veinSize: 8, yMin: 0, yMax: 15),
-            lapis = new OreLayer(countPerChunk: 1, veinSize: 7, yMin: 0, yMax: 31),
-            emerald = new OreLayer(countPerChunk: 11, veinSize: 1, yMin: 0, yMax: 32)
-        };
-    }
-
-    public struct OreLayer
-    {
-        public int countPerChunk;
-        public int veinSize;
-        public int yMin;
-        public int yMax;
-
-        public OreLayer(int countPerChunk, int veinSize, int yMin, int yMax)
-        {
-            this.countPerChunk = countPerChunk;
-            this.veinSize = veinSize;
-            this.yMin = yMin;
-            this.yMax = yMax;
-        }
-    }
-
-    public struct OreSettings
-    {
-        public OreLayer coal, iron, gold, redstone, lapis, diamond, emerald;
-    }
-
-    public BlockType GetGeneratedBlock(int worldX, int worldY, int worldZ)
-    {
-        if (worldY < 0 || worldY >= VoxelData.ChunkHeight) return BlockType.Air;
-
-        if (worldY <= 4)
-        {
-            int maxY = 1 + (Mathf.Abs(Hash3(worldX, 0, worldZ)) % 5);
-            if (worldY < maxY) return BlockType.Bedrock;
-        }
-
-        GetBiomeParams(worldX, worldZ, out _, out _, out _, out float ocean);
-        int surfaceY = GetLandHeight(worldX, worldZ);
-
-        float riverMask = RiverMask01(worldX, worldZ, ocean);
-
-        bool isOcean = minecraftLikeWater && ocean >= oceanThreshold;
-        bool isRiver = minecraftLikeWater && riverMask > 0f;
-
-        int waterLevel = SeaLevel;
-
-        if (worldY > surfaceY)
-        {
-            if (minecraftLikeWater && worldY <= waterLevel)
-            {
-                if (isRiver)
+                if (IsCaveMask(x, y, z, h))
                 {
-                    // Rivers: always fill to sea level
-                    return BlockType.Water;
+                    t = BlockType.Air;
                 }
-
-                if (isOcean)
+                else
                 {
-                    int depth = waterLevel - surfaceY;
-                    if (depth >= minWaterDepth) return BlockType.Water;
+                    if (y == h)
+                    {
+                        if (y <= SeaLevel)
+                        {
+                            if (biome == BiomeId.Ocean)
+                            {
+                                if (bedNoise > 0.3f) t = BlockType.Gravel;
+                                else if (bedNoise < -0.3f) t = BlockType.Clay;
+                                else if (bedNoise > 0.1f) t = BlockType.Dirt;
+                                else t = BlockType.Sand;
+                            }
+                            else
+                            {
+                                if (bedNoise > 0.4f) t = BlockType.Gravel;
+                                else t = BlockType.Dirt;
+                            }
+                        }
+                        else
+                        {
+                            if (biome == BiomeId.Desert) t = BlockType.Sand;
+                            else if (sandBeach) t = BlockType.Sand;
+                            else if (gravelBeach) t = BlockType.Gravel;
+                            else t = BlockType.Grass;
+                        }
+                    }
+                    else if (y >= stoneStart)
+                    {
+                        if (biome == BiomeId.Desert) t = BlockType.Sand;
+                        else if (y <= SeaLevel) 
+                        {
+                            if (bedNoise > 0.3f && biome == BiomeId.Ocean) t = BlockType.Gravel;
+                            else t = BlockType.Dirt;
+                        }
+                        else if (sandBeach) t = BlockType.Sand;
+                        else if (gravelBeach) t = BlockType.Gravel;
+                        else t = BlockType.Dirt;
+                    }
+                    else
+                    {
+                        t = BlockType.Stone;
+                    }
                 }
             }
-            return BlockType.Air;
+
+            col[y] = t;
         }
+    }
 
-        bool underwater = minecraftLikeWater && surfaceY < waterLevel && (isOcean || isRiver);
+    bool IsCaveMask(int x, int y, int z, int surfaceY)
+    {
+        return false;
+    }
 
-        if (worldY == surfaceY)
-        {
-            if (underwater)
-            {
-                // Sandy shores / riverbeds
-                return BlockType.Sand;
-            }
-            return BlockType.Grass;
-        }
-
-        int depthBelow = surfaceY - worldY;
-
-        if (depthBelow <= Mathf.Max(1, topSoilDepth))
-        {
-            if (underwater && depthBelow <= 3) return BlockType.Sand;
-            return BlockType.Dirt;
-        }
-
-        if (IsCave(worldX, worldY, worldZ, surfaceY))
-            return BlockType.Air;
-
+    BlockType BedrockAt(int x, int y, int z)
+    {
+        if (y == 0) return BlockType.Bedrock;
+        int n = Hash3(x, y, z);
+        int r = (n ^ (n >> 16)) & 255;
+        if (y <= 4 && r < 110) return BlockType.Bedrock;
         return BlockType.Stone;
     }
 
-    // =========================
-    // World storage / edits
-    // =========================
-
-    public BlockType GetBlock(Vector3Int worldPos)
+    float FBM2(float x, float z, int octaves, float gain, float lacunarity, int salt)
     {
-        if (worldPos.y < 0 || worldPos.y >= VoxelData.ChunkHeight) return BlockType.Air;
-
-        Vector2Int c = new Vector2Int(
-            Mathf.FloorToInt(worldPos.x / (float)VoxelData.ChunkSize),
-            Mathf.FloorToInt(worldPos.z / (float)VoxelData.ChunkSize)
-        );
-
-        if (!chunks.TryGetValue(c, out Chunk chunk))
-            return GetGeneratedBlock(worldPos.x, worldPos.y, worldPos.z);
-
-        Vector3Int local = chunk.WorldToLocal(worldPos);
-        return chunk.GetBlockLocal(local);
+        float a = 1f;
+        float f = 1f;
+        float s = 0f;
+        float nrm = 0f;
+        for (int i = 0; i < octaves; i++)
+        {
+            s += a * noise.Noise2(x * f, z * f, salt + i * 1013);
+            nrm += a;
+            a *= gain;
+            f *= lacunarity;
+        }
+        return s / Mathf.Max(0.0001f, nrm);
     }
 
-    public void SetBlock(Vector3Int worldPos, BlockType type)
+    public BlockType GetBlock(Vector3Int p)
     {
-        if (worldPos.y < 0 || worldPos.y >= VoxelData.ChunkHeight) return;
+        if (p.y < 0 || p.y >= VoxelData.ChunkHeight) return BlockType.Air;
+        Vector2Int c = WorldToChunkCoord(p);
+        if (chunks.TryGetValue(c, out Chunk ch)) return ch.GetBlockLocal(p.x - c.x * 16, p.y, p.z - c.y * 16);
+        return GetGeneratedBlock(p.x, p.y, p.z);
+    }
 
-        BlockType prev = GetBlock(worldPos);
+    public BlockType GetGeneratedBlock(int x, int y, int z)
+    {
+        BlockType[] col = new BlockType[VoxelData.ChunkHeight];
+        GenerateColumn(x, z, col);
+        return col[y];
+    }
 
-        Vector2Int c = new Vector2Int(
-            Mathf.FloorToInt(worldPos.x / (float)VoxelData.ChunkSize),
-            Mathf.FloorToInt(worldPos.z / (float)VoxelData.ChunkSize)
-        );
-
-        if (!chunks.TryGetValue(c, out Chunk chunk)) return;
-
-        Vector3Int local = chunk.WorldToLocal(worldPos);
-        chunk.SetBlockLocal(local, type);
-        chunk.Rebuild();
-
-        if (local.x == 0) RebuildChunkIfExists(new Vector2Int(c.x - 1, c.y));
-        if (local.x == VoxelData.ChunkSize - 1) RebuildChunkIfExists(new Vector2Int(c.x + 1, c.y));
-        if (local.z == 0) RebuildChunkIfExists(new Vector2Int(c.x, c.y - 1));
-        if (local.z == VoxelData.ChunkSize - 1) RebuildChunkIfExists(new Vector2Int(c.x, c.y + 1));
-
-        if (sandFalls)
+    public void SetBlock(Vector3Int p, BlockType t)
+    {
+        if (p.y < 0 || p.y >= VoxelData.ChunkHeight) return;
+        Vector2Int c = WorldToChunkCoord(p);
+        if (chunks.TryGetValue(c, out Chunk ch))
         {
-            if (type == BlockType.Sand) EnqueueSand(worldPos);
-            if (prev != BlockType.Air && type == BlockType.Air)
+            Vector3Int loc = ch.WorldToLocal(p);
+            ch.SetBlockLocal(loc, t);
+            ch.Rebuild();
+            
+            if (loc.x == 0) Reb(c + Vector2Int.left);
+            if (loc.x == 15) Reb(c + Vector2Int.right);
+            if (loc.z == 0) Reb(c + Vector2Int.down);
+            if (loc.z == 15) Reb(c + Vector2Int.up);
+
+            if (gravityBlocksEnabled && (t == BlockType.Sand || t == BlockType.Gravel))
             {
-                Vector3Int above = new Vector3Int(worldPos.x, worldPos.y + 1, worldPos.z);
-                if (GetBlock(above) == BlockType.Sand) EnqueueSand(above);
+                if (gravityQueuedSet.Add(p)) gravityQueue.Enqueue(p);
+            }
+            
+            if (t == BlockType.Air)
+            {
+                Vector3Int above = p + Vector3Int.up;
+                BlockType bAbove = GetBlock(above);
+                if (bAbove == BlockType.Sand || bAbove == BlockType.Gravel)
+                {
+                    if (gravityQueuedSet.Add(above)) gravityQueue.Enqueue(above);
+                }
             }
         }
     }
 
-    private void RebuildChunkIfExists(Vector2Int coord)
-    {
-        if (chunks.TryGetValue(coord, out Chunk ch))
-            ch.Rebuild();
-    }
+    void Reb(Vector2Int c) { if (chunks.TryGetValue(c, out Chunk ch)) ch.Rebuild(); }
 
-    private void EnqueueSand(Vector3Int pos)
-    {
-        if (!sandQueued.Add(pos)) return;
-        sandQueue.Enqueue(pos);
-    }
-
-    private void TickSand()
-    {
-        if (!sandFalls) return;
-
-        int n = Mathf.Max(1, sandChecksPerFrame);
-        for (int i = 0; i < n; i++)
-        {
-            if (sandQueue.Count == 0) break;
-
-            Vector3Int p = sandQueue.Dequeue();
-            sandQueued.Remove(p);
-
-            if (GetBlock(p) != BlockType.Sand) continue;
-
-            Vector3Int below = new Vector3Int(p.x, p.y - 1, p.z);
-            if (below.y < 0) continue;
-
-            BlockType b = GetBlock(below);
-            if (b != BlockType.Air && b != BlockType.Water) continue;
-
-            SpawnFallingSandEntity(p);
-            SetBlock(p, BlockType.Air);
-        }
-    }
-
-    private void SpawnFallingSandEntity(Vector3Int p)
-    {
-        GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        go.name = "FallingSand";
-        go.transform.position = new Vector3(p.x + 0.5f, p.y + 0.5f + fallingSandSpawnYOffset, p.z + 0.5f);
-
-        var mr = go.GetComponent<MeshRenderer>();
-        if (mr != null && materials != null && materials.sand != null) mr.sharedMaterial = materials.sand;
-
-        var rb = go.AddComponent<Rigidbody>();
-        rb.interpolation = RigidbodyInterpolation.Interpolate;
-        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-        rb.linearDamping = fallingSandLinearDrag;
-        rb.angularDamping = fallingSandAngularDrag;
-
-        var fs = go.AddComponent<FallingSandEntity>();
-        fs.world = this;
-    }
-
-    private int Hash(int x, int z, int seed)
+    public int Hash3(int x, int y, int z)
     {
         unchecked
         {
-            int h = seed;
-            h = (h * 397) ^ x;
-            h = (h * 397) ^ z;
-            h ^= (h << 13);
-            h ^= (h >> 17);
-            h ^= (h << 5);
+            int h = worldSeed;
+            h ^= x * 374761393;
+            h = (h << 13) ^ h;
+            h ^= y * 668265263;
+            h = (h << 13) ^ h;
+            h ^= z * 2147483647;
+            h = (h << 13) ^ h;
             return h;
         }
     }
 
-    public int Hash3(int x, int y, int z)
+    public bool RandomChance(int x, int y, int z, int mod, int lt)
     {
-        return Hash(x, z, Hash(y, x, settings.seed));
+        int v = Hash3(x, y, z);
+        if (v < 0) v = -v;
+        return (v % mod) < lt;
     }
 
-    public bool RandomChance(int worldX, int worldY, int worldZ, int mod, int lessThan)
+    void TickGravityBlocks()
     {
-        int h = Hash3(worldX * 92837111, worldY * 689287499, worldZ * 283923481);
-        int v = Mathf.Abs(h) % mod;
-        return v < lessThan;
+        int lim = Mathf.Max(1, gravityChecksPerFrame);
+        while (lim-- > 0 && gravityQueue.Count > 0)
+        {
+            Vector3Int p = gravityQueue.Dequeue();
+            gravityQueuedSet.Remove(p);
+
+            BlockType bt = GetBlock(p);
+            if ((bt == BlockType.Sand || bt == BlockType.Gravel))
+            {
+                Vector3Int below = p + Vector3Int.down;
+                BlockType bBelow = GetBlock(below);
+
+                if (bBelow == BlockType.Air || bBelow == BlockType.Water)
+                {
+                    SetBlock(p, BlockType.Air);
+                    SpawnFallingBlock(p, bt);
+                }
+            }
+        }
+    }
+
+    void SpawnFallingBlock(Vector3Int p, BlockType type)
+    {
+        GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        go.transform.position = p + new Vector3(0.5f, 0.5f, 0.5f);
+        
+        FallingBlock fb = go.AddComponent<FallingBlock>();
+        fb.world = this;
+        fb.type = type;
+
+        var mr = go.GetComponent<MeshRenderer>();
+        if (mr != null && materials != null)
+        {
+             if (type == BlockType.Sand) mr.sharedMaterial = materials.sand;
+             else if (type == BlockType.Gravel) mr.sharedMaterial = materials.gravel;
+        }
+    }
+
+    struct FastNoise
+    {
+        int seed;
+
+        public FastNoise(int seed) { this.seed = seed; }
+
+        static float Fade(float t) => t * t * t * (t * (t * 6f - 15f) + 10f);
+        static float Lerp(float a, float b, float t) => a + (b - a) * t;
+
+        int Hash(int x, int y, int z, int salt)
+        {
+            unchecked
+            {
+                int h = seed ^ salt;
+                h ^= x * 374761393;
+                h = (h << 13) ^ h;
+                h ^= y * 668265263;
+                h = (h << 13) ^ h;
+                h ^= z * 2147483647;
+                h = (h << 13) ^ h;
+                h *= 1274126177;
+                return h;
+            }
+        }
+
+        static float Grad2(int h, float x, float z)
+        {
+            int g = h & 7;
+            float u = (g < 4) ? x : z;
+            float v = (g < 4) ? z : x;
+            float a = ((g & 1) == 0) ? u : -u;
+            float b = ((g & 2) == 0) ? v : -v;
+            return a + b;
+        }
+
+        static float Grad3(int h, float x, float y, float z)
+        {
+            int g = h & 15;
+            float u = g < 8 ? x : y;
+            float v = g < 4 ? y : (g == 12 || g == 14 ? x : z);
+            float a = ((g & 1) == 0) ? u : -u;
+            float b = ((g & 2) == 0) ? v : -v;
+            return a + b;
+        }
+
+        public float Noise2(float x, float z, int salt)
+        {
+            int xi = Mathf.FloorToInt(x);
+            int zi = Mathf.FloorToInt(z);
+            float xf = x - xi;
+            float zf = z - zi;
+
+            float u = Fade(xf);
+            float v = Fade(zf);
+
+            int h00 = Hash(xi, 0, zi, salt);
+            int h10 = Hash(xi + 1, 0, zi, salt);
+            int h01 = Hash(xi, 0, zi + 1, salt);
+            int h11 = Hash(xi + 1, 0, zi + 1, salt);
+
+            float x1 = Lerp(Grad2(h00, xf, zf), Grad2(h10, xf - 1f, zf), u);
+            float x2 = Lerp(Grad2(h01, xf, zf - 1f), Grad2(h11, xf - 1f, zf - 1f), u);
+            float n = Lerp(x1, x2, v);
+            return Mathf.Clamp(n * 0.7071f, -1f, 1f);
+        }
+
+        public float Noise3(float x, float y, float z, int salt)
+        {
+            int xi = Mathf.FloorToInt(x);
+            int yi = Mathf.FloorToInt(y);
+            int zi = Mathf.FloorToInt(z);
+
+            float xf = x - xi;
+            float yf = y - yi;
+            float zf = z - zi;
+
+            float u = Fade(xf);
+            float v = Fade(yf);
+            float w = Fade(zf);
+
+            int h000 = Hash(xi, yi, zi, salt);
+            int h100 = Hash(xi + 1, yi, zi, salt);
+            int h010 = Hash(xi, yi + 1, zi, salt);
+            int h110 = Hash(xi + 1, yi + 1, zi, salt);
+            int h001 = Hash(xi, yi, zi + 1, salt);
+            int h101 = Hash(xi + 1, yi, zi + 1, salt);
+            int h011 = Hash(xi, yi + 1, zi + 1, salt);
+            int h111 = Hash(xi + 1, yi + 1, zi + 1, salt);
+
+            float x00 = Lerp(Grad3(h000, xf, yf, zf), Grad3(h100, xf - 1f, yf, zf), u);
+            float x10 = Lerp(Grad3(h010, xf, yf - 1f, zf), Grad3(h110, xf - 1f, yf - 1f, zf), u);
+            float x01 = Lerp(Grad3(h001, xf, yf, zf - 1f), Grad3(h101, xf - 1f, yf, zf - 1f), u);
+            float x11 = Lerp(Grad3(h011, xf, yf - 1f, zf - 1f), Grad3(h111, xf - 1f, yf - 1f, zf - 1f), u);
+
+            float y0 = Lerp(x00, x10, v);
+            float y1 = Lerp(x01, x11, v);
+
+            float n = Lerp(y0, y1, w);
+            return Mathf.Clamp(n * 0.57735f, -1f, 1f);
+        }
     }
 }
